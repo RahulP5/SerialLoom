@@ -19,11 +19,11 @@ tracing.workspace = true
 serialport = "4.10"
 uuid = { version = "1", features = ["v4"] }
 serialloom-proto = { path = "../serialloom-proto" }
-sha2 = "0.10"
+sha2 = "0.11"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [build-dependencies]
-sha2 = "0.10"
+sha2 = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [

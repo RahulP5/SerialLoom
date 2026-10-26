@@ -126,3 +126,15 @@ Only needed if per-PC signing turns out not to be enough (code 52), or to avoid 
 3. Sign `serialloom_port.dll` with the EV certificate, put the package files in a CAB (`makecab`), and sign the CAB.
 4. Submit the CAB for **attestation signing** in Partner Center. Microsoft returns a Microsoft-signed package.
 5. Zip it and set the `SIGNED_DRIVER_URL` repository secret; the release workflow then ships it. SerialLoom detects the trusted signature and skips per-PC signing.
+
+## Switching to this driver once it is signed
+
+Everything for this driver stays in the repository: the driver itself (`drivers/serialloom-port`), its app backend (`crates/serialloom-core/src/driver/native`) and the *SerialLoom driver* option in Settings. It is only left out of the installer while Windows cannot load it. Once Microsoft has signed it:
+
+1. **Ship the signed package.** Put the Microsoft-signed `serialloom_port.inf/.dll/.cat` in `drivers/serialloom-port/target/release/package/` (or let the build produce and then replace them), and add the three files back to `bundle.resources` in `src-tauri/tauri.conf.json` as `driver/serialloom_port.*`.
+2. **Install it with SerialLoom.** In `src-tauri/windows/hooks.nsh`, change the post-install step from `install-usb` to `install-driver`. A Microsoft-signed catalog is installed as is (per-PC signing is skipped automatically).
+3. **Make it the default.** In `crates/serialloom-core/src/config.rs`, set the default `DriverKind` to `Native`, raise `SETTINGS_VERSION`, and make `migrate()` move `Usb` users to `Native`.
+4. **Drop the virtual USB route.** Remove the `usbip/...` entries from `bundle.resources`, the *Fetch Microsoft-signed usbip-win2 files* steps from the workflows, `scripts/fetch-usbip-win2.ps1`, the usbip-win2 section of `THIRD_PARTY_NOTICES.md` and `docs/USB_PORTS.md`. Optionally remove `crates/serialloom-core/src/driver/usb` and `crates/serialloom-core/src/usbip`.
+5. **Clean up old installs.** Keep the `uninstall-all` cleanup (it removes leftover virtual USB devices and the usbip-win2 controller SerialLoom installed), so users upgrading from a USB-based version end up with a clean system.
+
+Ports created with the virtual USB route are separate devices: after switching, users recreate their ports once (their connections in the topology keep working if the same COM numbers are chosen).

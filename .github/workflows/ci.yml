@@ -65,7 +65,7 @@ jobs:
         shell: pwsh
         run: ./scripts/fetch-usbip-win2.ps1 -InstallTemporarily
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm

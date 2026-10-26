@@ -2,7 +2,7 @@
 
 export const DEVELOPER = {
   name: "Rahul Pachpind",
-  github: "https://github.com/rahulp5",
+  github: "https://github.com/RahulP5",
 };
 
 export const COPYRIGHT_YEAR = 2026;

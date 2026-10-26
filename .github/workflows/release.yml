@@ -1,10 +1,6 @@
 name: Release
 
-# Push a tag such as v0.1.0 to build the installer and open a draft release.
-#
-# The driver ships unsigned; the installer signs it on each PC (free, see
-# docs/DRIVER.md). If you obtain a Microsoft-signed package, provide it as the
-# `SIGNED_DRIVER_URL` secret and this workflow ships that instead.
+# Push a tag such as v0.1.0 to build the installer and publish a GitHub release.
 on:
   push:
     tags: ["v*"]
@@ -14,42 +10,11 @@ permissions:
   contents: write
 
 jobs:
-  driver:
-    runs-on: windows-2022
-    env:
-      SIGNED_DRIVER_URL: ${{ secrets.SIGNED_DRIVER_URL }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install LLVM 17
-        run: choco install llvm --version=17.0.6 --allow-downgrade -y --no-progress
-      - name: Build driver package
-        shell: pwsh
-        env:
-          LIBCLANG_PATH: C:\Program Files\LLVM\bin
-        run: ./drivers/serialloom-port/package.ps1 -NoSign
-      - name: Use Microsoft-signed driver when available
-        if: env.SIGNED_DRIVER_URL != ''
-        shell: pwsh
-        run: |
-          $pkg = "drivers/serialloom-port/target/release/package"
-          Invoke-WebRequest $env:SIGNED_DRIVER_URL -OutFile signed.zip
-          Remove-Item "$pkg/*" -Force
-          Expand-Archive signed.zip -DestinationPath $pkg -Force
-      - uses: actions/upload-artifact@v4
-        with:
-          name: driver-package
-          path: drivers/serialloom-port/target/release/package/
-
   release:
-    needs: driver
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: driver-package
-          path: drivers/serialloom-port/target/release/package/
+
       - name: Fetch Microsoft-signed usbip-win2 files
         shell: pwsh
         run: ./scripts/fetch-usbip-win2.ps1 -InstallTemporarily
@@ -58,9 +23,16 @@ jobs:
         with:
           node-version: 24
           cache: npm
+
       - uses: dtolnay/rust-toolchain@stable
+
       - uses: Swatinem/rust-cache@v2
+
       - run: npm ci
+
+      - name: Tests
+        run: cargo test --workspace
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -68,8 +40,20 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: SerialLoom ${{ github.ref_name }}
           releaseBody: |
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's new.
+            **Virtual COM port manager for Windows** - create, pair, split, join and bridge serial ports with a live visual editor.
 
-            Windows 10 (1803+) and Windows 11, x64. Includes the SerialLoom virtual port driver; no other software needed.
-          releaseDraft: true
+            ### Highlights
+            - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)
+            - Virtual null-modem pairs, port splitting and joining, and bridging serial ports to TCP
+            - Live topology canvas with throughput, plus a traffic monitor (ASCII / hex)
+            - Ports come back with the same numbers when SerialLoom starts; deleting a port removes it from Windows
+
+            ### Install
+            Download **SerialLoom_*_x64-setup.exe** below and run it. Windows 10 (1803+) or Windows 11, x64. No test mode or extra drivers needed.
+
+            ### Notes
+            - The installer is not code-signed yet, so Windows SmartScreen may ask you to confirm: *More info > Run anyway*.
+            - Virtual ports exist while SerialLoom is running.
+            - Uses the bundled, Microsoft-signed [usbip-win2](https://github.com/vadimgrn/usbip-win2) virtual USB controller (BSD-2-Clause).
+          releaseDraft: false
           prerelease: false

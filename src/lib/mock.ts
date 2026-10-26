@@ -165,7 +165,7 @@ function portsList(): PortInfo[] {
 
 export const mockApi: Api = {
   appInfo: () =>
-    delay({ name: "SerialLoom", version: "0.1.0-browser", repository: "https://github.com/rahulp5/serialloom", platform: "browser" }),
+    delay({ name: "SerialLoom", version: "0.1.0-browser", repository: "https://github.com/RahulP5/SerialLoom", platform: "browser" }),
   getSettings: () => delay(settings),
   setSettings: async (s) => {
     settings = s;

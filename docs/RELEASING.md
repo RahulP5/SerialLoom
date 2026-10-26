@@ -43,6 +43,6 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Review the draft, attach release notes from `CHANGELOG.md`, and publish it.
+The release is published automatically with the installer attached. Edit its notes on GitHub if needed.
 
 The installer is not code-signed yet, so Windows SmartScreen asks users to confirm. Free signing for open-source projects is available from [SignPath Foundation](https://signpath.org) once the repository is public.

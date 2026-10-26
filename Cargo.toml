@@ -9,8 +9,8 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 authors = ["Rahul Pachpind"]
-repository = "https://github.com/rahulp5/serialloom"
-homepage = "https://github.com/rahulp5/serialloom"
+repository = "https://github.com/RahulP5/SerialLoom"
+homepage = "https://github.com/RahulP5/SerialLoom"
 
 [workspace.dependencies]
 serialloom-core = { path = "crates/serialloom-core" }

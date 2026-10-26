@@ -7,7 +7,7 @@
 **Weave serial ports together.**
 Create virtual COM ports, split one port between many apps, join ports, and bridge serial devices to the network, all in a live visual editor.
 
-[![CI](https://github.com/rahulp5/serialloom/actions/workflows/ci.yml/badge.svg)](https://github.com/rahulp5/serialloom/actions/workflows/ci.yml)
+[![CI](https://github.com/RahulP5/SerialLoom/actions/workflows/ci.yml/badge.svg)](https://github.com/RahulP5/SerialLoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-6366f1.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-22d3ee.svg)
 ![Built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-orange.svg)
@@ -39,7 +39,7 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 
 ## Install
 
-Download the latest installer from [Releases](https://github.com/rahulp5/serialloom/releases) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. Windows asks for administrator permission when you create, renumber or remove virtual ports.
+Download the latest installer from [Releases](https://github.com/RahulP5/SerialLoom/releases) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. Windows asks for administrator permission when you create, renumber or remove virtual ports.
 
 Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
 
@@ -55,7 +55,7 @@ Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
 
 ```powershell
 # Prerequisites: Rust (MSVC), Node.js 20+, and for the driver: WDK + LLVM 17 (see docs/DRIVER.md)
-git clone https://github.com/rahulp5/serialloom.git
+git clone https://github.com/RahulP5/SerialLoom.git
 cd serialloom
 npm install
 
@@ -91,8 +91,8 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit togethe
 
 ## Feedback
 
-SerialLoom is developed by [Rahul Pachpind](https://github.com/rahulp5). It does not accept code contributions, but bug reports and ideas are welcome in [Issues](https://github.com/rahulp5/serialloom/issues). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+SerialLoom is developed by [Rahul Pachpind](https://github.com/RahulP5). Bug reports and ideas are welcome in [Issues](https://github.com/RahulP5/SerialLoom/issues). To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE) © 2026 [Rahul Pachpind](https://github.com/rahulp5)
+[MIT](LICENSE) © 2026 [Rahul Pachpind](https://github.com/RahulP5)

@@ -4,7 +4,7 @@ SerialLoom installs a driver and runs some operations as administrator, so secur
 
 ## Reporting a vulnerability
 
-Please **do not** open a public issue. Use GitHub's [private vulnerability reporting](https://github.com/rahulp5/serialloom/security/advisories/new) and include:
+Please **do not** open a public issue. Use GitHub's [private vulnerability reporting](https://github.com/RahulP5/SerialLoom/security/advisories/new) and include:
 
 - what an attacker could do, and under which conditions
 - steps to reproduce, or a proof of concept

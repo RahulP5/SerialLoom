@@ -56,9 +56,6 @@
       }
     },
     "resources": {
-      "../drivers/serialloom-port/target/release/package/serialloom_port.inf": "driver/serialloom_port.inf",
-      "../drivers/serialloom-port/target/release/package/serialloom_port.dll": "driver/serialloom_port.dll",
-      "../drivers/serialloom-port/target/release/package/serialloom_port.cat": "driver/serialloom_port.cat",
       "../vendor/usbip-win2/LICENSE.txt": "usbip/LICENSE.txt",
       "../vendor/usbip-win2/SOURCE.txt": "usbip/SOURCE.txt",
       "../vendor/usbip-win2/driver/usbip2_ude.inf": "usbip/driver/usbip2_ude.inf",

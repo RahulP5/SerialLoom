@@ -19,7 +19,7 @@ jobs:
     env:
       SIGNED_DRIVER_URL: ${{ secrets.SIGNED_DRIVER_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install LLVM 17
         run: choco install llvm --version=17.0.6 --allow-downgrade -y --no-progress
@@ -45,7 +45,7 @@ jobs:
     needs: driver
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           name: driver-package

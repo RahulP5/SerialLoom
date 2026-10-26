@@ -1,0 +1,98 @@
+;
+; SerialLoom virtual serial port driver (UMDF 2)
+; Copyright (c) 2026 Rahul Pachpind. MIT License.
+;
+; Each device with hardware ID Root\SerialLoomPort is one virtual COM port.
+; The SerialLoom app creates and removes these devices.
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Ports
+ClassGuid   = {4D36E978-E325-11CE-BFC1-08002BE10318}
+Provider    = %ProviderString%
+CatalogFile = serialloom_port.cat
+DriverVer   =
+PnpLockdown = 1
+
+[Manufacturer]
+%ManufacturerString% = SerialLoom, NT$ARCH$.10.0...17134, NT$ARCH$.10.0...22000
+
+[SerialLoom.NT$ARCH$.10.0...17134]
+%DeviceName% = SerialLoomPort_Install, Root\SerialLoomPort
+
+[SerialLoom.NT$ARCH$.10.0...22000]
+%DeviceName% = SerialLoomPort_Install_Win11, Root\SerialLoomPort
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[SourceDisksFiles]
+serialloom_port.dll = 1
+
+; ----------------------------------------------------------------- Windows 11
+[SerialLoomPort_Install_Win11.NT]
+CopyFiles = SerialLoomPort_Files
+Include   = WUDFRD.inf
+Needs     = WUDFRD.NT
+
+[SerialLoomPort_Install_Win11.NT.HW]
+AddReg  = SerialLoomPort_DeviceType
+Include = WUDFRD.inf
+Needs   = WUDFRD.NT.HW
+
+[SerialLoomPort_Install_Win11.NT.Services]
+Include = WUDFRD.inf
+Needs   = WUDFRD.NT.Services
+
+[SerialLoomPort_Install_Win11.NT.Wdf]
+UmdfService                = serialloom_port, SerialLoomPort_Umdf
+UmdfServiceOrder           = serialloom_port
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+UmdfFileObjectPolicy       = AllowNullAndUnknownFileObjects
+UmdfFsContextUsePolicy     = CannotUseFsContexts
+
+; ----------------------------------------------------------------- Windows 10
+[SerialLoomPort_Install.NT]
+CopyFiles = SerialLoomPort_Files
+
+[SerialLoomPort_Install.NT.HW]
+AddReg = SerialLoomPort_DeviceType
+
+[SerialLoomPort_Install.NT.Services]
+AddService = WUDFRd, 0x000001fa, WUDFRD_ServiceInstall
+
+[SerialLoomPort_Install.NT.Wdf]
+UmdfService                = serialloom_port, SerialLoomPort_Umdf
+UmdfServiceOrder           = serialloom_port
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+UmdfFileObjectPolicy       = AllowNullAndUnknownFileObjects
+UmdfFsContextUsePolicy     = CannotUseFsContexts
+
+[WUDFRD_ServiceInstall]
+DisplayName   = %WudfRdDisplayName%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %12%\WUDFRd.sys
+
+; ----------------------------------------------------------------- Shared
+[SerialLoomPort_Umdf]
+UmdfLibraryVersion = $UMDFVERSION$
+ServiceBinary      = %13%\serialloom_port.dll
+
+[SerialLoomPort_DeviceType]
+HKR,,DeviceType,0x10001,0x0000001b ; FILE_DEVICE_SERIAL_PORT
+
+[SerialLoomPort_Files]
+serialloom_port.dll
+
+[Strings]
+ProviderString     = "SerialLoom"
+ManufacturerString = "SerialLoom"
+DiskName           = "SerialLoom Driver Disk"
+DeviceName         = "SerialLoom Virtual Serial Port"
+WudfRdDisplayName  = "Windows Driver Foundation - User-mode Driver Framework Reflector"

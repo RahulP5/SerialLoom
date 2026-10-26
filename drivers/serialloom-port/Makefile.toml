@@ -1,0 +1,15 @@
+# `cargo make` builds the DLL, stamps the INF, creates the catalog and
+# test-signs the package into target/<profile>/package.
+extend = "target/rust-driver-makefile.toml"
+
+[config]
+load_script = '''
+#!@rust
+//! ```cargo
+//! [dependencies]
+//! wdk-build = "0.5.1"
+//! ```
+#![allow(unused_doc_comments)]
+
+wdk_build::cargo_make::load_rust_driver_makefile()?
+'''

@@ -1,0 +1,64 @@
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/target/
+src-tauri/target/
+src-tauri/gen/schemas/
+drivers/**/target/
+dist/
+.vite/
+**/*.rs.bk
+*.pdb
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+
+# ---------------------------------------------------------------------------
+# Third-party binaries, fetched at build time (scripts/fetch-usbip-win2.ps1).
+# Never commit them: CI fetches and verifies the Microsoft-signed originals.
+# ---------------------------------------------------------------------------
+vendor/
+
+# ---------------------------------------------------------------------------
+# Secrets and signing material: certificates, private keys, tokens
+# ---------------------------------------------------------------------------
+*.pfx
+*.p12
+*.pvk
+*.spc
+*.cer
+*.crt
+*.pem
+*.key
+*.snk
+.env
+.env.*
+!.env.example
+
+# Driver packages and installers built locally (published via GitHub Releases)
+*.cab
+*.msi
+*.zip
+*-setup.exe
+
+# ---------------------------------------------------------------------------
+# Local and tool files
+# ---------------------------------------------------------------------------
+*.local
+*.log
+npm-debug.log*
+*.tmp
+*.dmp
+.claude/settings.local.json
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

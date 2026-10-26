@@ -1,0 +1,75 @@
+name: Release
+
+# Push a tag such as v0.1.0 to build the installer and open a draft release.
+#
+# The driver ships unsigned; the installer signs it on each PC (free, see
+# docs/DRIVER.md). If you obtain a Microsoft-signed package, provide it as the
+# `SIGNED_DRIVER_URL` secret and this workflow ships that instead.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  driver:
+    runs-on: windows-2022
+    env:
+      SIGNED_DRIVER_URL: ${{ secrets.SIGNED_DRIVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install LLVM 17
+        run: choco install llvm --version=17.0.6 --allow-downgrade -y --no-progress
+      - name: Build driver package
+        shell: pwsh
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: ./drivers/serialloom-port/package.ps1 -NoSign
+      - name: Use Microsoft-signed driver when available
+        if: env.SIGNED_DRIVER_URL != ''
+        shell: pwsh
+        run: |
+          $pkg = "drivers/serialloom-port/target/release/package"
+          Invoke-WebRequest $env:SIGNED_DRIVER_URL -OutFile signed.zip
+          Remove-Item "$pkg/*" -Force
+          Expand-Archive signed.zip -DestinationPath $pkg -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: driver-package
+          path: drivers/serialloom-port/target/release/package/
+
+  release:
+    needs: driver
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: driver-package
+          path: drivers/serialloom-port/target/release/package/
+      - name: Fetch Microsoft-signed usbip-win2 files
+        shell: pwsh
+        run: ./scripts/fetch-usbip-win2.ps1 -InstallTemporarily
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: SerialLoom ${{ github.ref_name }}
+          releaseBody: |
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's new.
+
+            Windows 10 (1803+) and Windows 11, x64. Includes the SerialLoom virtual port driver; no other software needed.
+          releaseDraft: true
+          prerelease: false

@@ -1,0 +1,10 @@
+[package]
+name = "serialloom-port-logic"
+description = "Serial port behaviour of the SerialLoom driver, free of WDF so it can be unit tested"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+serialloom-proto = { path = "../serialloom-proto" }

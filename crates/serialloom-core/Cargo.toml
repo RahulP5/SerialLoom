@@ -1,0 +1,42 @@
+[package]
+name = "serialloom-core"
+description = "Routing engine and virtual serial port driver abstraction used by SerialLoom"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+keywords = ["serial", "com-port", "virtual-serial-port", "rs232", "splitter"]
+categories = ["hardware-support", "network-programming"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+serialport = "4.10"
+uuid = { version = "1", features = ["v4"] }
+serialloom-proto = { path = "../serialloom-proto" }
+sha2 = "0.10"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[build-dependencies]
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Devices_DeviceAndDriverInstallation",
+  "Win32_Devices_Properties",
+  "Win32_Devices_SerialCommunication",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_IO",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }

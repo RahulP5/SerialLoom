@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>SerialLoom</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a2348"/>
+      <stop offset="1" stop-color="#0a0f1f"/>
+    </linearGradient>
+    <linearGradient id="warp" gradientUnits="userSpaceOnUse" x1="140" y1="0" x2="380" y2="0">
+      <stop offset="0" stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#22d3ee"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+  <rect x="16.5" y="16.5" width="479" height="479" rx="111.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+
+  <!-- outer threads pass under the weft -->
+  <g fill="none" stroke="url(#warp)" stroke-width="24" stroke-linecap="round">
+    <path d="M150 256 C 232 256, 280 148, 364 148"/>
+    <path d="M150 256 C 232 256, 280 364, 364 364"/>
+  </g>
+
+  <!-- weft thread -->
+  <path d="M256 104 V 408" stroke="#0e1530" stroke-width="52" stroke-linecap="round"/>
+  <path d="M256 112 V 400" stroke="#c4b5fd" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- middle thread passes over the weft -->
+  <path d="M228 256 H 284" stroke="#0e1530" stroke-width="50"/>
+  <path d="M150 256 H 364" stroke="url(#warp)" stroke-width="24" stroke-linecap="round"/>
+
+  <!-- ports -->
+  <circle cx="146" cy="256" r="40" fill="#0e1530"/>
+  <circle cx="146" cy="256" r="30" fill="#a5b4fc"/>
+  <circle cx="146" cy="256" r="12" fill="#0e1530"/>
+  <g fill="#67e8f9">
+    <circle cx="370" cy="148" r="26"/>
+    <circle cx="370" cy="256" r="26"/>
+    <circle cx="370" cy="364" r="26"/>
+  </g>
+  <g fill="#0e1530">
+    <circle cx="370" cy="148" r="9"/>
+    <circle cx="370" cy="256" r="9"/>
+    <circle cx="370" cy="364" r="9"/>
+  </g>
+</svg>

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SerialLoom",
+  "version": "0.1.0",
+  "identifier": "io.github.serialloom",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "SerialLoom",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 560,
+        "center": true,
+        "dragDropEnabled": false,
+        "backgroundColor": "#0b0f1a"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Rahul Pachpind",
+    "copyright": "Copyright (c) 2026 Rahul Pachpind. MIT License.",
+    "category": "DeveloperTool",
+    "shortDescription": "Virtual COM ports with a visual editor: pair, split, join and bridge serial ports",
+    "longDescription": "SerialLoom creates virtual serial (COM) ports with its own open-source driver and lets you split one port between several applications, join ports, and bridge serial ports to TCP, with a live visual topology.",
+    "licenseFile": "../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "installerHooks": "./windows/hooks.nsh",
+        "installerIcon": "icons/icon.ico"
+      }
+    },
+    "resources": {
+      "../drivers/serialloom-port/target/release/package/serialloom_port.inf": "driver/serialloom_port.inf",
+      "../drivers/serialloom-port/target/release/package/serialloom_port.dll": "driver/serialloom_port.dll",
+      "../drivers/serialloom-port/target/release/package/serialloom_port.cat": "driver/serialloom_port.cat",
+      "../vendor/usbip-win2/LICENSE.txt": "usbip/LICENSE.txt",
+      "../vendor/usbip-win2/SOURCE.txt": "usbip/SOURCE.txt",
+      "../vendor/usbip-win2/driver/usbip2_ude.inf": "usbip/driver/usbip2_ude.inf",
+      "../vendor/usbip-win2/driver/usbip2_ude.sys": "usbip/driver/usbip2_ude.sys",
+      "../vendor/usbip-win2/driver/usbip2_ude.cat": "usbip/driver/usbip2_ude.cat",
+      "../vendor/usbip-win2/driver/usbip2_filter.inf": "usbip/driver/usbip2_filter.inf",
+      "../vendor/usbip-win2/driver/usbip2_filter.sys": "usbip/driver/usbip2_filter.sys",
+      "../vendor/usbip-win2/driver/usbip2_filter.cat": "usbip/driver/usbip2_filter.cat",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    }
+  }
+}

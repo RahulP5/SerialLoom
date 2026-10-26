@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/serialloom-core", "crates/serialloom-proto", "crates/serialloom-port-logic", "src-tauri"]
+exclude = ["drivers"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["Rahul Pachpind"]
+repository = "https://github.com/rahulp5/serialloom"
+homepage = "https://github.com/rahulp5/serialloom"
+
+[workspace.dependencies]
+serialloom-core = { path = "crates/serialloom-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+parking_lot = "0.12"
+tracing = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,9 @@
+[package]
+name = "serialloom-proto"
+description = "Constants and wire structures shared by the SerialLoom driver and app"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]

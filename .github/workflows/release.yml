@@ -36,7 +36,7 @@ jobs:
           Invoke-WebRequest $env:SIGNED_DRIVER_URL -OutFile signed.zip
           Remove-Item "$pkg/*" -Force
           Expand-Archive signed.zip -DestinationPath $pkg -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: driver-package
           path: drivers/serialloom-port/target/release/package/

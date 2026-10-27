@@ -3,7 +3,7 @@ import { Activity, Eraser, Pause, Pencil, Play, Plus, Square, Trash, X } from "l
 import clsx from "clsx";
 import { useStore } from "../store";
 import { api } from "../lib/api";
-import { HUB_META, ascii, endpointSubtitle, endpointTitle, formatBytes, formatRate, hex } from "../lib/format";
+import { HUB_META, ascii, endpointSubtitle, endpointTitle, formatBytes, formatRate, hex, speedMismatch } from "../lib/format";
 import { HUB_ICON } from "./nodes/HubNode";
 import type { HubView, MonitorRecord } from "../lib/types";
 
@@ -36,6 +36,7 @@ function HubInspector({ hub }: { hub: HubView }) {
   const meta = HUB_META[spec.kind];
   const Icon = HUB_ICON[spec.kind];
   const endpoints = [spec.master, ...spec.members];
+  const mismatch = status.running ? speedMismatch(endpoints, status.endpoints) : null;
   const hubRates = rates[spec.id] ?? [];
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(spec.name);
@@ -69,7 +70,7 @@ function HubInspector({ hub }: { hub: HubView }) {
               />
             ) : (
               <button className="group flex max-w-full items-center gap-1.5 text-left" onClick={() => setEditing(true)}>
-                <span className="truncate text-base font-semibold text-white">{spec.name}</span>
+                <span className="truncate text-base font-semibold text-ink-0">{spec.name}</span>
                 <Pencil size={12} className="shrink-0 text-ink-400 opacity-0 group-hover:opacity-100" />
               </button>
             )}
@@ -152,9 +153,9 @@ function HubInspector({ hub }: { hub: HubView }) {
                         background: !status.running ? "#475569" : st?.connected ? "#34d399" : err ? "#f43f5e" : "#fbbf24",
                       }}
                     />
-                    <span className="font-mono text-sm font-semibold text-white">{endpointTitle(e)}</span>
+                    <span className="font-mono text-sm font-semibold text-ink-0">{endpointTitle(e)}</span>
                     {i === 0 && <span className="chip bg-ink-700 text-ink-200">master</span>}
-                    <span className="ml-auto truncate text-[11px] text-ink-400">{endpointSubtitle(e, st?.peerOpen)}</span>
+                    <span className="ml-auto truncate text-[11px] text-ink-400">{endpointSubtitle(e, st)}</span>
                     {i > 0 && spec.kind !== "bridge" && spec.members.length > 1 && (
                       <button
                         className="text-ink-500 hover:text-rose-300"
@@ -189,6 +190,12 @@ function HubInspector({ hub }: { hub: HubView }) {
               );
             })}
           </div>
+          {mismatch && (
+            <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+              Ports use different speeds: {mismatch}. SerialLoom still passes all data, because virtual ports are not
+              limited by the baud rate. Two real devices would need the same speed.
+            </p>
+          )}
         </section>
         <TrafficMonitor hub={hub} />
       </div>
@@ -246,7 +253,7 @@ function TrafficMonitor({ hub }: { hub: HubView }) {
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={clsx("px-2 py-0.5 uppercase", mode === m ? "bg-ink-700 text-white" : "text-ink-300")}
+              className={clsx("px-2 py-0.5 uppercase", mode === m ? "bg-ink-700 text-ink-0" : "text-ink-300")}
             >
               {m}
             </button>

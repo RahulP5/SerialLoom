@@ -247,6 +247,46 @@ pub struct EndpointStatus {
     #[serde(default)]
     pub peer_open: bool,
     pub last_error: Option<String>,
+    /// For virtual ports: the line settings the program on the COM side chose.
+    #[serde(default)]
+    pub line: Option<LineStatus>,
+}
+
+/// Line settings a program set on a virtual port (with `SetCommState` or
+/// its terminal's settings dialog).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineStatus {
+    pub baud_rate: u32,
+    /// Short form such as `8N1`.
+    pub framing: String,
+    pub dtr: bool,
+    pub rts: bool,
+}
+
+impl LineStatus {
+    /// Builds the status from the raw values a driver reports: parity
+    /// 0-4 (none, odd, even, mark, space), stop bits 0-2 (1, 1.5, 2).
+    pub fn from_raw(baud_rate: u32, data_bits: u8, parity: u8, stop_bits: u8, dtr: bool, rts: bool) -> Self {
+        let p = match parity {
+            1 => 'O',
+            2 => 'E',
+            3 => 'M',
+            4 => 'S',
+            _ => 'N',
+        };
+        let s = match stop_bits {
+            1 => "1.5",
+            2 => "2",
+            _ => "1",
+        };
+        Self {
+            baud_rate,
+            framing: format!("{data_bits}{p}{s}"),
+            dtr,
+            rts,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -351,6 +391,16 @@ pub struct DriverInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_status_framing() {
+        assert_eq!(LineStatus::from_raw(9600, 8, 0, 0, true, false).framing, "8N1");
+        assert_eq!(
+            LineStatus::from_raw(115_200, 7, 2, 2, false, false).framing,
+            "7E2"
+        );
+        assert_eq!(LineStatus::from_raw(300, 5, 1, 1, false, true).framing, "5O1.5");
+    }
 
     #[test]
     fn star_routing() {

@@ -1,4 +1,5 @@
 mod commands;
+mod tray;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,6 +23,11 @@ pub fn run() {
     serialloom_core::logging::init("app");
 
     let app = tauri::Builder::default()
+        // Starting SerialLoom again (Start menu, shortcut) shows the running
+        // copy instead of starting a second one.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main_window(app);
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -59,7 +65,18 @@ pub fn run() {
                 settings: Mutex::new(settings),
                 settings_path,
             });
+            tray::create(app.handle())?;
             Ok(())
+        })
+        // Closing the window keeps SerialLoom running in the notification
+        // area, so programs using the virtual ports are not cut off.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,

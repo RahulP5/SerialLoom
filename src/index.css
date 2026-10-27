@@ -4,6 +4,9 @@
   --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
 
+  /* Gray scale: 0 is the strongest text, 950 the deepest background.
+     The light theme below flips it, so components use the same classes. */
+  --color-ink-0: #ffffff;
   --color-ink-950: #070a14;
   --color-ink-900: #0b0f1a;
   --color-ink-850: #0f1424;
@@ -19,6 +22,47 @@
   --color-loom-400: #818cf8;
   --color-loom-500: #6366f1;
   --color-thread-400: #22d3ee;
+}
+
+:root {
+  --sl-minimap-mask: rgba(7, 10, 20, 0.7);
+}
+
+/* Light theme. Accent shades used for text on dark tints (100-400) become
+   their darker counterparts so they stay readable on light backgrounds. */
+:root[data-theme="light"] {
+  --color-ink-0: #0a0f1f;
+  --color-ink-950: #e9ecf4;
+  --color-ink-900: #f4f6fb;
+  --color-ink-850: #ffffff;
+  --color-ink-800: #eef1f7;
+  --color-ink-700: #dde2ed;
+  --color-ink-600: #c7cede;
+  --color-ink-500: #9aa3bb;
+  --color-ink-400: #636d89;
+  --color-ink-300: #4a536f;
+  --color-ink-200: #313a55;
+  --color-ink-100: #1a2036;
+
+  --color-loom-400: #5457e8;
+  --color-thread-400: #0891b2;
+
+  --color-rose-100: #9f1239;
+  --color-rose-200: #9f1239;
+  --color-rose-300: #be123c;
+  --color-rose-400: #e11d48;
+  --color-emerald-100: #065f46;
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-amber-100: #78350f;
+  --color-amber-300: #b45309;
+  --color-amber-400: #d97706;
+  --color-cyan-300: #0e7490;
+  --color-cyan-400: #0891b2;
+  --color-violet-100: #5b21b6;
+  --color-violet-300: #6d28d9;
+
+  --sl-minimap-mask: rgba(226, 231, 241, 0.7);
 }
 
 html,
@@ -68,7 +112,7 @@ textarea,
   @apply btn bg-linear-to-r from-loom-500 to-cyan-500 text-white shadow-lg shadow-loom-500/20 hover:brightness-110;
 }
 @utility btn-ghost {
-  @apply btn text-ink-200 hover:bg-ink-700/60 hover:text-white;
+  @apply btn text-ink-200 hover:bg-ink-700/60 hover:text-ink-0;
 }
 @utility btn-outline {
   @apply btn border border-ink-600 text-ink-200 hover:border-ink-500 hover:bg-ink-700/50;

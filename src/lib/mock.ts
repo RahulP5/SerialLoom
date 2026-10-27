@@ -76,6 +76,10 @@ function emptyStatus(spec: HubSpec, running: boolean): HubStatus {
       connected: running,
       peerOpen: running && e.spec.kind === "virtual" && i !== 2,
       lastError: null,
+      line:
+        running && e.spec.kind === "virtual" && i !== 2
+          ? { baudRate: i === 0 ? 115200 : 9600, framing: "8N1", dtr: true, rts: true }
+          : null,
     })),
   };
 }

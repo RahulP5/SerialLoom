@@ -77,7 +77,7 @@ export function buildGraph(
       position: { x, y: ny },
       data: {
         title: endpointTitle(e),
-        subtitle: endpointSubtitle(e, status.endpoints[i]?.peerOpen),
+        subtitle: endpointSubtitle(e, status.endpoints[i]),
         icon: iconFor(e, ports),
         role: i === 0 ? "master" : "member",
         hubId: spec.id,

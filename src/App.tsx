@@ -1,8 +1,23 @@
 import { useEffect } from "react";
-import { Cable, CircleAlert, CircleCheck, Download, Info, List, LoaderCircle, RefreshCw, Settings, Workflow, X } from "lucide-react";
+import {
+  Cable,
+  CircleAlert,
+  CircleCheck,
+  Download,
+  Info,
+  List,
+  LoaderCircle,
+  Moon,
+  RefreshCw,
+  Settings,
+  Sun,
+  Workflow,
+  X,
+} from "lucide-react";
 import clsx from "clsx";
 import { useStore, type View } from "./store";
 import { api } from "./lib/api";
+import { useTheme } from "./lib/theme";
 import { TopologyView } from "./components/views/TopologyView";
 import { PortsView, VirtualPortsView } from "./components/views/ListViews";
 import { SettingsView } from "./components/views/SettingsView";
@@ -63,7 +78,7 @@ function Sidebar() {
       <div className="flex items-center gap-2.5 px-4 pt-5 pb-6">
         <img src="/logo.svg" alt="" className="h-9 w-9" />
         <div>
-          <div className="text-[15px] leading-tight font-semibold text-white">SerialLoom</div>
+          <div className="text-[15px] leading-tight font-semibold text-ink-0">SerialLoom</div>
           <div className="text-[11px] text-ink-400">Virtual COM ports</div>
         </div>
       </div>
@@ -74,7 +89,7 @@ function Sidebar() {
             onClick={() => setView(n.id)}
             className={clsx(
               "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
-              view === n.id ? "bg-ink-700/70 text-white" : "text-ink-300 hover:bg-ink-800 hover:text-ink-100",
+              view === n.id ? "bg-ink-700/70 text-ink-0" : "text-ink-300 hover:bg-ink-800 hover:text-ink-100",
             )}
           >
             <n.icon size={16} className={view === n.id ? "text-cyan-300" : ""} />
@@ -89,12 +104,25 @@ function Sidebar() {
         </div>
         <div className="flex items-center justify-between">
           <span>v{info?.version ?? "…"}</span>
-          <button className="hover:text-ink-200" onClick={() => refresh()} title="Refresh ports">
-            <RefreshCw size={13} />
-          </button>
+          <div className="flex items-center gap-2.5">
+            <ThemeToggle />
+            <button className="hover:text-ink-200" onClick={() => refresh()} title="Refresh ports">
+              <RefreshCw size={13} />
+            </button>
+          </div>
         </div>
       </div>
     </nav>
+  );
+}
+
+function ThemeToggle() {
+  const { resolved, setPref } = useTheme();
+  const next = resolved === "dark" ? "light" : "dark";
+  return (
+    <button className="hover:text-ink-200" onClick={() => setPref(next)} title={`Switch to ${next} theme`}>
+      {resolved === "dark" ? <Sun size={13} /> : <Moon size={13} />}
+    </button>
   );
 }
 
@@ -106,7 +134,7 @@ function DriverBanner() {
       <div className="flex items-center gap-2 border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-xs text-violet-100">
         <Info size={14} className="shrink-0" />
         <span className="flex-1">{driver.message ?? "Demo mode: ports are simulated."}</span>
-        <button className="underline hover:text-white" onClick={() => setView("settings")}>
+        <button className="underline hover:text-ink-0" onClick={() => setView("settings")}>
           Change driver
         </button>
       </div>
@@ -180,7 +208,7 @@ function Toasts() {
             <Info size={16} className="mt-0.5 shrink-0 text-cyan-400" />
           )}
           <span className="selectable flex-1 break-words text-ink-100">{t.text}</span>
-          <button className="text-ink-400 hover:text-white" onClick={() => dismissToast(t.id)} aria-label="Dismiss">
+          <button className="text-ink-400 hover:text-ink-0" onClick={() => dismissToast(t.id)} aria-label="Dismiss">
             <X size={14} />
           </button>
         </div>

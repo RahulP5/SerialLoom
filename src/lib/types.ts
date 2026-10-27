@@ -45,6 +45,16 @@ export interface EndpointStatus {
   /** Virtual ports: a program has the COM side open. */
   peerOpen: boolean;
   lastError: string | null;
+  /** Virtual ports: the line settings the program chose (null while no program has the port open). */
+  line?: LineStatus | null;
+}
+
+export interface LineStatus {
+  baudRate: number;
+  /** Data bits, parity, stop bits, e.g. "8N1". */
+  framing: string;
+  dtr: boolean;
+  rts: boolean;
 }
 
 export interface HubStatus {

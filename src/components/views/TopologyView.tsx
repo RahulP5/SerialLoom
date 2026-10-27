@@ -13,6 +13,7 @@ import {
 import { ArrowLeftRight, Cable, GripVertical, LayoutGrid, Merge, Plus, RadioTower, Split } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../../store";
+import { useTheme } from "../../lib/theme";
 import { buildGraph, type GraphNode } from "../graph";
 import { EndpointNode } from "../nodes/EndpointNode";
 import { HubNode } from "../nodes/HubNode";
@@ -57,6 +58,7 @@ export function TopologyView() {
 
 function Canvas() {
   const { hubs, ports, rates, selection, select, openDialog } = useStore();
+  const theme = useTheme((s) => s.resolved);
   const { fitView } = useReactFlow();
   const saved = useRef<Record<string, XY>>(loadPositions());
   const [nodes, setNodes] = useState<GraphNode[]>([]);
@@ -146,19 +148,19 @@ function Canvas() {
         }}
         onPaneClick={() => select(null)}
         nodesConnectable={false}
-        colorMode="dark"
+        colorMode={theme}
         minZoom={0.3}
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#26315480" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="var(--color-ink-600)" />
         <Controls position="bottom-left" showInteractive={false} />
         <MiniMap
           position="bottom-right"
           pannable
           zoomable
           nodeColor={(n) => ((n.data as { color?: string }).color ?? "#475569")}
-          maskColor="rgba(7,10,20,0.7)"
+          maskColor="var(--sl-minimap-mask)"
           style={{ width: 160, height: 100, borderRadius: 10, border: "1px solid var(--color-ink-700)" }}
         />
       </ReactFlow>
@@ -205,7 +207,7 @@ function EmptyState() {
     <div className="pointer-events-none absolute inset-0 grid place-items-center">
       <div className="panel pointer-events-auto max-w-md p-6 text-center">
         <img src="/logo.svg" alt="" className="mx-auto mb-3 h-14 w-14" />
-        <h2 className="text-lg font-semibold text-white">Weave your first connection</h2>
+        <h2 className="text-lg font-semibold text-ink-0">Weave your first connection</h2>
         <p className="mt-1.5 text-sm text-ink-300">
           Drag a port from the left onto the canvas to split it, or start from one of the templates.
         </p>
@@ -265,7 +267,7 @@ function PaletteItem({ port, busyBy }: { port: PortInfo; busyBy?: string }) {
       <GripVertical size={14} className="shrink-0 text-ink-500 group-hover:text-ink-300" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-sm font-semibold text-white">{port.name}</span>
+          <span className="font-mono text-sm font-semibold text-ink-0">{port.name}</span>
           <KindBadge kind={port.kind} />
         </div>
         <div className="truncate text-[11px] text-ink-400">

@@ -18,8 +18,8 @@ use parking_lot::Mutex;
 
 use crate::driver::{ControlChannel, PortDriver};
 use crate::model::{
-    EndpointSpec, EndpointStatus, FlowControl, HubKind, HubSpec, MonitorRecord, Parity, SerialSettings,
-    StopBits, route_targets,
+    EndpointSpec, EndpointStatus, FlowControl, HubKind, HubSpec, LineStatus, MonitorRecord, Parity,
+    SerialSettings, StopBits, route_targets,
 };
 
 const READ_TIMEOUT: Duration = Duration::from_millis(25);
@@ -40,6 +40,7 @@ struct Counters {
     connected: AtomicBool,
     peer_open: AtomicBool,
     last_error: Mutex<Option<String>>,
+    line: Mutex<Option<LineStatus>>,
 }
 
 impl Counters {
@@ -51,6 +52,7 @@ impl Counters {
             connected: self.connected.load(Ordering::Relaxed),
             peer_open: self.peer_open.load(Ordering::Relaxed),
             last_error: self.last_error.lock().clone(),
+            line: self.line.lock().clone(),
         }
     }
 
@@ -365,8 +367,18 @@ fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
         while !sh.stopped() {
             if polled.elapsed() >= STATE_POLL {
                 polled = Instant::now();
-                let open = channel.state().is_some_and(|s| s.com_open != 0);
-                counters.peer_open.store(open, Ordering::Relaxed);
+                let state = channel.state().filter(|s| s.com_open != 0);
+                counters.peer_open.store(state.is_some(), Ordering::Relaxed);
+                *counters.line.lock() = state.map(|s| {
+                    LineStatus::from_raw(
+                        s.baud_rate,
+                        s.data_bits,
+                        s.parity,
+                        s.stop_bits,
+                        s.dtr_rts & 1 != 0,
+                        s.dtr_rts & 2 != 0,
+                    )
+                });
             }
             match channel.read(&mut buf, READ_TIMEOUT * 2) {
                 Ok(0) => {}
@@ -380,6 +392,7 @@ fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
         }
         sh.detach(idx);
         counters.peer_open.store(false, Ordering::Relaxed);
+        *counters.line.lock() = None;
         if !sh.stopped() {
             sh.sleep(RETRY_DELAY);
         }

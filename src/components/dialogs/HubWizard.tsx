@@ -120,7 +120,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
               style={k === kind ? { borderColor: m.color } : undefined}
             >
               <KIcon size={18} style={{ color: m.color }} />
-              <div className="mt-1.5 text-sm font-semibold text-white">{m.label}</div>
+              <div className="mt-1.5 text-sm font-semibold text-ink-0">{m.label}</div>
               <div className="mt-0.5 text-[11px] leading-snug text-ink-300">{m.describe}</div>
             </button>
           );
@@ -223,11 +223,11 @@ function Pill({ x, y, w, text, virtual }: { x: number; y: number; w: number; tex
         width={w}
         height={22}
         rx={7}
-        fill="#131a2e"
-        stroke={virtual ? "#a78bfa" : "#3a4670"}
+        fill="var(--color-ink-800)"
+        stroke={virtual ? "#a78bfa" : "var(--color-ink-500)"}
         strokeDasharray={virtual ? "4 3" : undefined}
       />
-      <text x={x + w / 2} y={y + 4} textAnchor="middle" fontSize={11.5} fontFamily="Cascadia Code, Consolas, monospace" fill="#e6eaf5">
+      <text x={x + w / 2} y={y + 4} textAnchor="middle" fontSize={11.5} fontFamily="Cascadia Code, Consolas, monospace" fill="var(--color-ink-100)">
         {text.length > 22 ? `${text.slice(0, 21)}…` : text}
         {virtual ? "  (new)" : ""}
       </text>

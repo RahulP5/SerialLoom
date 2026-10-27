@@ -11,7 +11,7 @@ export function AboutView() {
     <div className="flex h-full justify-center overflow-y-auto px-8 py-7">
       <div className="my-auto w-full max-w-lg text-center">
         <img src="/logo.svg" alt="SerialLoom logo" className="mx-auto h-24 w-24 drop-shadow-[0_10px_30px_rgba(99,102,241,0.35)]" />
-        <h1 className="mt-4 text-2xl font-semibold text-white">SerialLoom</h1>
+        <h1 className="mt-4 text-2xl font-semibold text-ink-0">SerialLoom</h1>
         <p className="mt-1 text-sm text-ink-300">Version {info?.version ?? "…"}</p>
         <p className="mt-4 text-sm leading-relaxed text-ink-200">
           Weave serial ports together: create virtual COM port pairs, split one port between several applications, join
@@ -39,7 +39,7 @@ export function AboutView() {
                 .join("")}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="font-semibold text-white">{DEVELOPER.name}</div>
+              <div className="font-semibold text-ink-0">{DEVELOPER.name}</div>
               <div className="text-xs text-ink-400">Creator and maintainer</div>
             </div>
             <button className="btn-outline px-2.5 py-1 text-xs" onClick={() => openExternal(DEVELOPER.github)}>

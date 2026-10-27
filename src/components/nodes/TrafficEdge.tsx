@@ -32,7 +32,7 @@ function TrafficEdgeImpl(props: EdgeProps<TrafficEdgeType>) {
         <path
           d={path}
           fill="none"
-          stroke="#e2e8f0"
+          stroke="var(--color-ink-200)"
           strokeOpacity={0.55}
           strokeWidth={1.5}
           strokeDasharray="2 10"

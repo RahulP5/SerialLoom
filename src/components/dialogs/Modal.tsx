@@ -40,7 +40,7 @@ export function Modal({
         <header className="flex shrink-0 items-start gap-3 border-b border-ink-700/70 px-5 py-4">
           {icon && <div className="mt-0.5">{icon}</div>}
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-semibold text-white">{title}</h2>
+            <h2 className="text-base font-semibold text-ink-0">{title}</h2>
             {subtitle && <p className="mt-0.5 text-sm text-ink-300">{subtitle}</p>}
           </div>
           <button className="btn-ghost -mr-2 px-2" onClick={onClose} aria-label="Close">

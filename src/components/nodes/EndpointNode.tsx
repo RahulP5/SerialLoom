@@ -31,7 +31,7 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="truncate font-mono text-[15px] font-semibold text-white">{data.title}</span>
+            <span className="truncate font-mono text-[15px] font-semibold text-ink-0">{data.title}</span>
             {data.role === "master" && (
               <span className="chip bg-ink-700 text-ink-200" title="Hub master">
                 M

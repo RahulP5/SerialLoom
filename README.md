@@ -35,7 +35,10 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 | **Bridge** | Wire any two endpoints: COM ↔ COM, COM ↔ TCP server, COM ↔ TCP client. |
 | **Bus** | Every endpoint hears every other, like an RS-485 multidrop line. |
 | **Live topology** | Drag ports onto the canvas, watch data flow, inspect bytes in the traffic monitor (ASCII or hex). |
+| **Any baud rate** | Programs pick any speed (300 to 12 Mbaud, standard or custom) and framing; the topology shows what each program chose. Virtual ports move data at full speed whatever the setting. Real ports use the speed you set for them. |
 | **Persistent** | Connections are saved and can start automatically with SerialLoom. |
+| **Runs in the background** | Closing the window keeps SerialLoom in the notification area, so ports stay open. *Quit SerialLoom* in the icon's menu closes every port. |
+| **Light and dark themes** | Follows Windows, or choose one in *Settings*. |
 
 ## Install
 
@@ -56,7 +59,7 @@ Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
 ```powershell
 # Prerequisites: Rust (MSVC), Node.js 20+, and for the driver: WDK + LLVM 17 (see docs/DRIVER.md)
 git clone https://github.com/RahulP5/SerialLoom.git
-cd serialloom
+cd SerialLoom
 npm install
 
 .\scripts\fetch-usbip-win2.ps1                  # fetch the Microsoft-signed virtual USB controller

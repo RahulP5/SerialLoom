@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { CircleAlert, CircleCheck, Monitor, Moon, PanelBottom, Sun } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../../store";
 import type { AppSettings, DriverKind } from "../../lib/types";
 import { DriverMissing } from "./ListViews";
+import { useTheme, type ThemePref } from "../../lib/theme";
+
+const THEMES: { id: ThemePref; label: string; icon: typeof Sun }[] = [
+  { id: "system", label: "Same as Windows", icon: Monitor },
+  { id: "light", label: "Light", icon: Sun },
+  { id: "dark", label: "Dark", icon: Moon },
+];
 
 export function SettingsView() {
   const { settings, driver, saveSettings, busy } = useStore();
@@ -18,12 +25,27 @@ export function SettingsView() {
     <div className="h-full overflow-y-auto px-8 py-7">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
-          <h1 className="text-xl font-semibold text-white">Settings</h1>
-          <p className="mt-1 text-sm text-ink-300">Choose where virtual ports come from.</p>
+          <h1 className="text-xl font-semibold text-ink-0">Settings</h1>
+          <p className="mt-1 text-sm text-ink-300">Appearance, running in the background, and where virtual ports come from.</p>
         </div>
 
+        <Appearance />
+
         <section className="panel p-5">
-          <h2 className="font-semibold text-white">Virtual port driver</h2>
+          <h2 className="flex items-center gap-2 font-semibold text-ink-0">
+            <PanelBottom size={16} className="text-cyan-300" /> Running in the background
+          </h2>
+          <p className="mt-1.5 text-sm text-ink-300">
+            Closing the window keeps SerialLoom running in the notification area (the arrow next to the clock), so
+            virtual ports stay open for your programs. Click the SerialLoom icon there to open the window again.
+          </p>
+          <p className="mt-1.5 text-sm text-ink-300">
+            To stop all ports and exit, right-click the icon and choose <b className="text-ink-100">Quit SerialLoom</b>.
+          </p>
+        </section>
+
+        <section className="panel p-5">
+          <h2 className="font-semibold text-ink-0">Virtual port driver</h2>
           <p className="mt-1 text-sm text-ink-300">
             Choose how SerialLoom creates COM ports. Everything needed is included with SerialLoom.
           </p>
@@ -88,6 +110,32 @@ export function SettingsView() {
   );
 }
 
+function Appearance() {
+  const { pref, setPref } = useTheme();
+  return (
+    <section className="panel p-5">
+      <h2 className="font-semibold text-ink-0">Appearance</h2>
+      <p className="mt-1 text-sm text-ink-300">Applies right away.</p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        {THEMES.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setPref(t.id)}
+            aria-pressed={pref === t.id}
+            className={clsx(
+              "flex items-center gap-2.5 rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors",
+              pref === t.id ? "border-loom-400 bg-loom-500/10 text-ink-0" : "border-ink-700 text-ink-200 hover:border-ink-500",
+            )}
+          >
+            <t.icon size={16} className={pref === t.id ? "text-cyan-300" : "text-ink-400"} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DriverCard({ active, onClick, title, text }: { active: boolean; onClick: () => void; title: string; text: string }) {
   return (
     <button
@@ -97,7 +145,7 @@ function DriverCard({ active, onClick, title, text }: { active: boolean; onClick
         active ? "border-loom-400 bg-loom-500/10" : "border-ink-700 hover:border-ink-500",
       )}
     >
-      <div className="flex items-center gap-2 font-semibold text-white">
+      <div className="flex items-center gap-2 font-semibold text-ink-0">
         <span className={clsx("h-3.5 w-3.5 rounded-full border-2", active ? "border-loom-400 bg-loom-400" : "border-ink-500")} />
         {title}
       </div>

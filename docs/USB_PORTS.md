@@ -13,11 +13,11 @@ Any program ──opens COM5──► usbser.sys            (Windows' built-in U
 1. SerialLoom runs a USB/IP server on the loopback interface only (`crates/serialloom-core/src/usbip/`).
 2. For each virtual port it registers a software **USB CDC-ACM** device: a composite device with an interface association, VID `0x1209` (pid.codes, the open-source vendor ID), and a fixed serial number per port.
 3. SerialLoom asks the virtual host controller to plug the device in, sending `PLUGIN_HARDWARE_ONCE` directly to its driver interface (no `usbip.exe` or Visual C++ runtime needed). Windows loads `usbccgp.sys` and `usbser.sys`, both Microsoft drivers, and assigns a COM number.
-4. The program's writes arrive as bulk OUT transfers. Data for the program completes pending bulk IN transfers. `SET_LINE_CODING` and `SET_CONTROL_LINE_STATE` carry the baud rate and DTR/RTS.
+4. The program's writes arrive as bulk OUT transfers. Data for the program completes pending bulk IN transfers. `SET_LINE_CODING` and `SET_CONTROL_LINE_STATE` carry the baud rate and DTR/RTS. SerialLoom accepts any baud rate and shows it in the topology, but does not slow data down to it: virtual ports always run at full speed.
 
 ## Behaviour
 
-- **Lifetime:** ports exist while SerialLoom runs. When it exits, the virtual devices are unplugged. On the next start they are plugged in again with the same serial numbers, so Windows reuses the same COM numbers.
+- **Lifetime:** ports exist while SerialLoom runs. Closing the window does not stop it: SerialLoom keeps running in the notification area. When it exits (*Quit SerialLoom* in the notification-area menu), the virtual devices are unplugged. On the next start they are plugged in again with the same serial numbers, so Windows reuses the same COM numbers.
 - **COM numbers:** Windows first assigns the next free number, as for any USB adapter. When you ask for a specific name (e.g. COM20), SerialLoom then renames the port the way Device Manager's *Port Settings > Advanced* does: it updates the port's `PortName`, claims the number in the COM port database and restarts the port. This takes one administrator prompt per batch. Windows remembers the number for that device, so it stays the same on every start. *Virtual ports > Change number* does the same for existing ports, and connections using the port follow the new name.
 - **Device Manager:** ports appear under *Ports (COM & LPT)* as "USB Serial Device (COMn)". The controller appears as "USBip 3.X Emulated Host Controller".
 

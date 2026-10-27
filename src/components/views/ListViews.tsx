@@ -21,7 +21,7 @@ function Page({
       <div className="mx-auto max-w-5xl">
         <div className="mb-5 flex items-end gap-4">
           <div className="flex-1">
-            <h1 className="text-xl font-semibold text-white">{title}</h1>
+            <h1 className="text-xl font-semibold text-ink-0">{title}</h1>
             <p className="mt-1 text-sm text-ink-300">{subtitle}</p>
           </div>
           {actions}
@@ -70,7 +70,7 @@ export function PortsView() {
             )}
             {ports.map((p) => (
               <tr key={p.name} className="hover:bg-ink-800/40">
-                <td className="px-4 py-2.5 font-mono font-semibold text-white">{p.name}</td>
+                <td className="px-4 py-2.5 font-mono font-semibold text-ink-0">{p.name}</td>
                 <td className="px-4 py-2.5">
                   <KindBadge kind={p.kind} />
                 </td>
@@ -150,7 +150,7 @@ export function VirtualPortsView() {
             return (
               <div key={p.id} className="panel p-4">
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-lg font-semibold text-white">{p.name}</span>
+                  <span className="font-mono text-lg font-semibold text-ink-0">{p.name}</span>
                   <span
                     className={
                       p.state === "ready"

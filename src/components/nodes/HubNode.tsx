@@ -44,7 +44,7 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
           <Icon size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold text-white">{spec.name}</div>
+          <div className="truncate text-sm font-semibold text-ink-0">{spec.name}</div>
           <div className="text-[11px]" style={{ color: data.color }}>
             {HUB_META[spec.kind].label} · {spec.members.length + 1} ends
           </div>

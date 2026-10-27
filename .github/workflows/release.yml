@@ -47,13 +47,16 @@ jobs:
             - Virtual null-modem pairs, port splitting and joining, and bridging serial ports to TCP
             - Live topology canvas with throughput, plus a traffic monitor (ASCII / hex)
             - Ports come back with the same numbers when SerialLoom starts; deleting a port removes it from Windows
+            - Runs in the notification area: closing the window keeps ports open, *Quit SerialLoom* in the tray menu closes them
+            - Shows the baud rate and framing each program chose on its virtual port
+            - Light and dark themes (or follow Windows)
 
             ### Install
             Download **SerialLoom_*_x64-setup.exe** below and run it. Windows 10 (1803+) or Windows 11, x64. No test mode or extra drivers needed.
 
             ### Notes
             - The installer is not code-signed yet, so Windows SmartScreen may ask you to confirm: *More info > Run anyway*.
-            - Virtual ports exist while SerialLoom is running.
+            - Virtual ports exist while SerialLoom is running (also when its window is closed).
             - Uses the bundled, Microsoft-signed [usbip-win2](https://github.com/vadimgrn/usbip-win2) virtual USB controller (BSD-2-Clause).
           releaseDraft: false
           prerelease: false

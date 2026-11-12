@@ -127,6 +127,7 @@ pub enum ControlReply {
 pub struct CdcState {
     pub serial_number: String,
     pub line: LineCoding,
+    /// Reported as is; says nothing about whether a program has the port open.
     pub dtr: bool,
     pub rts: bool,
     pub configured: bool,
@@ -141,11 +142,6 @@ impl CdcState {
             rts: false,
             configured: false,
         }
-    }
-
-    /// True when the program on the COM side has the port open (DTR raised).
-    pub fn port_open(&self) -> bool {
-        self.dtr
     }
 
     /// Handles a SETUP packet plus its OUT data stage.
@@ -288,9 +284,9 @@ mod tests {
     fn control_lines() {
         let mut s = CdcState::new("x");
         s.control(&setup(0x21, 0x22, 0x3, 0, 0), &[]);
-        assert!(s.dtr && s.rts && s.port_open());
-        s.control(&setup(0x21, 0x22, 0, 0, 0), &[]);
-        assert!(!s.port_open());
+        assert!(s.dtr && s.rts);
+        s.control(&setup(0x21, 0x22, 0x2, 0, 0), &[]);
+        assert!(!s.dtr && s.rts);
     }
 
     #[test]

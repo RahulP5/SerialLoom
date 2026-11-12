@@ -43,6 +43,12 @@ struct DevState {
     conn: Option<TcpStream>,
     /// SerialLoom has the control side open.
     control_open: bool,
+    /// A program has the COM port open. usbser.sys keeps a bulk IN request
+    /// pending while the port is open and cancels it on close. DTR cannot
+    /// tell: programs may read with DTR low, and it stays high after close.
+    reading: bool,
+    /// The last bulk IN request completed. A cancel can cross its completion.
+    last_in: Option<u32>,
 }
 
 /// One exported virtual serial device.
@@ -65,6 +71,8 @@ impl VirtualDevice {
                 notified: None,
                 conn: None,
                 control_open: false,
+                reading: false,
+                last_in: None,
             }),
             data_ready: Condvar::new(),
         }
@@ -79,9 +87,9 @@ impl VirtualDevice {
         self.state.lock().conn.is_some()
     }
 
-    /// Active while USB is connected; CDC has no reliable app open/close notification.
+    /// A program has the COM port open (the host is reading).
     pub fn is_port_open(&self) -> bool {
-        self.is_attached()
+        self.state.lock().reading
     }
 
     /// Closes the client connection, which unplugs the device.
@@ -119,6 +127,8 @@ impl VirtualDevice {
         st.conn = None;
         st.pending_in.clear();
         st.pending_notify.clear();
+        st.reading = false;
+        st.last_in = None;
         st.cdc.dtr = false;
         st.cdc.rts = false;
         st.cdc.configured = false;
@@ -150,6 +160,10 @@ impl VirtualDevice {
                 send(&mut st, &p::encode_ret_submit(s.seqnum, 0, &[], n));
             }
             cdc::EP_DATA_IN if s.direction == p::DIR_IN => {
+                if !st.reading {
+                    st.reading = true;
+                    tracing::info!("virtual device {}: a program opened the port", self.info.busid);
+                }
                 st.pending_in.push_back(Pending {
                     seqnum: s.seqnum,
                     length: s.length,
@@ -170,9 +184,16 @@ impl VirtualDevice {
     fn on_unlink(&self, seqnum: u32, victim: u32) {
         let mut st = self.state.lock();
         let before = st.pending_in.len() + st.pending_notify.len();
+        let cancels_read = st.last_in == Some(victim) || st.pending_in.iter().any(|q| q.seqnum == victim);
         st.pending_in.retain(|q| q.seqnum != victim);
         st.pending_notify.retain(|q| q.seqnum != victim);
         let removed = before != st.pending_in.len() + st.pending_notify.len();
+        if cancels_read && st.pending_in.is_empty() && st.reading {
+            // The program closed the port. Its successor must not get old data.
+            st.reading = false;
+            st.to_host.clear();
+            tracing::info!("virtual device {}: the program closed the port", self.info.busid);
+        }
         let status = if removed { p::ECONNRESET } else { 0 };
         send(&mut st, &p::encode_ret_unlink(seqnum, status));
     }
@@ -198,6 +219,7 @@ fn flush_in(st: &mut DevState) {
         let chunk: Vec<u8> = st.to_host.drain(..n).collect();
         let msg = p::encode_ret_submit(req.seqnum, 0, &chunk, n);
         send(st, &msg);
+        st.last_in = Some(req.seqnum);
     }
 }
 
@@ -237,11 +259,11 @@ impl ControlChannel for DeviceChannel {
 
     fn write(&self, data: &[u8]) -> io::Result<usize> {
         let mut st = self.0.state.lock();
-        if st.conn.is_none() {
-            // USB disconnected: accept and drop, like an unplugged cable.
+        if st.conn.is_none() || !st.reading {
+            // No program has the port open: accept and drop, like a cable
+            // with nothing on the other end.
             return Ok(data.len());
         }
-        // DTR is a control signal, not a prerequisite for receiving data.
         let room = BUFFER_LIMIT.saturating_sub(st.to_host.len());
         let n = room.min(data.len());
         st.to_host.extend(&data[..n]);
@@ -253,8 +275,7 @@ impl ControlChannel for DeviceChannel {
         let st = self.0.state.lock();
         Some(ControlState {
             version: serialloom_proto::PORT_STATE_VERSION,
-            // Keep the port active independently of the application's DTR setting.
-            com_open: u32::from(st.conn.is_some()),
+            com_open: u32::from(st.reading),
             baud_rate: st.cdc.line.baud_rate,
             data_bits: st.cdc.line.data_bits,
             parity: st.cdc.line.parity,
@@ -468,6 +489,22 @@ mod tests {
             self.0.read_exact(&mut data).unwrap();
             (seq, status, data)
         }
+
+        /// Cancels request `victim`, as the host does when a program closes the port.
+        fn unlink(&mut self, seq: u32, victim: u32) {
+            let mut b = Vec::new();
+            for v in [p::CMD_UNLINK, seq, 0, 0, 0, victim] {
+                b.extend_from_slice(&v.to_be_bytes());
+            }
+            b.extend_from_slice(&[0u8; 24]);
+            self.0.write_all(&b).unwrap();
+        }
+
+        /// Returns once the server has handled everything sent before (GET_STATUS round trip).
+        fn sync(&mut self, seq: u32) {
+            self.submit(seq, p::DIR_IN, 0, 2, [0x80, 0, 0, 0, 0, 0, 2, 0], &[]);
+            assert_eq!(self.ret(), (seq, 0, vec![0, 0]));
+        }
     }
 
     /// Reads the completion of an OUT transfer (no payload follows).
@@ -494,44 +531,73 @@ mod tests {
         host.submit(2, p::DIR_OUT, 0, 0, [0x00, 9, 1, 0, 0, 0, 0, 0], &[]);
         assert_eq!(ret_out(&mut host), (2, 0));
 
-        // Program opens the port without asserting DTR or RTS.
+        // Program opens the port and leaves DTR low (Xshell does): it is
+        // open as soon as the host reads.
+        assert!(!dev.is_port_open());
         host.submit(3, p::DIR_OUT, 0, 0, [0x21, 0x22, 0, 0, 0, 0, 0, 0], &[]);
         assert_eq!(ret_out(&mut host), (3, 0));
+        host.submit(4, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.sync(5);
         assert!(dev.is_port_open());
-        assert_eq!(channel.state().unwrap().com_open, 1);
-        assert_eq!(channel.state().unwrap().dtr_rts, 0);
+        let state = channel.state().unwrap();
+        assert_eq!((state.com_open, state.dtr_rts), (1, 0));
+
+        // SerialLoom writes "yo": it completes the pending read.
+        assert_eq!(channel.write(b"yo").unwrap(), 2);
+        assert_eq!(host.ret(), (4, 0, b"yo".to_vec()));
 
         // Program writes "hi": SerialLoom reads it.
-        host.submit(4, p::DIR_OUT, cdc::EP_DATA_OUT, 2, [0; 8], b"hi");
-        assert_eq!(ret_out(&mut host), (4, 0));
+        host.submit(6, p::DIR_OUT, cdc::EP_DATA_OUT, 2, [0; 8], b"hi");
+        assert_eq!(ret_out(&mut host), (6, 0));
         let mut buf = [0u8; 8];
         let n = channel.read(&mut buf, Duration::from_secs(2)).unwrap();
         assert_eq!(&buf[..n], b"hi");
 
-        // Program waits for data (pending IN), SerialLoom writes "yo".
-        host.submit(5, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
-        assert_eq!(channel.write(b"yo").unwrap(), 2);
-        let (seq, status, data) = host.ret();
-        assert_eq!((seq, status), (5, 0));
-        assert_eq!(data, b"yo");
-
-        // Cancelling a pending read.
-        host.submit(6, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
-        let mut unlink = Vec::new();
-        for v in [p::CMD_UNLINK, 7, 0, 0, 0, 6] {
-            unlink.extend_from_slice(&v.to_be_bytes());
-        }
-        unlink.extend_from_slice(&[0u8; 24]);
-        host.0.write_all(&unlink).unwrap();
-        assert_eq!(ret_out(&mut host), (7, p::ECONNRESET));
-
-        // Unsupported request stalls.
-        host.submit(8, p::DIR_IN, 0, 10, [0x80, 6, 0, 6, 0, 0, 10, 0], &[]);
-        assert_eq!(ret_out(&mut host), (8, p::EPIPE));
-
-        dev.disconnect();
+        // Program closes the port: the host cancels its pending read.
+        host.submit(7, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.unlink(8, 7);
+        assert_eq!(ret_out(&mut host), (8, p::ECONNRESET));
         assert!(!dev.is_port_open());
         assert_eq!(channel.state().unwrap().com_open, 0);
+
+        // Unsupported request stalls.
+        host.submit(9, p::DIR_IN, 0, 10, [0x80, 6, 0, 6, 0, 0, 10, 0], &[]);
+        assert_eq!(ret_out(&mut host), (9, p::EPIPE));
+    }
+
+    #[test]
+    fn closed_port_gets_no_stale_data() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST4");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+
+        // No program yet: dropped.
+        assert_eq!(channel.write(b"early").unwrap(), 5);
+
+        host.submit(1, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.sync(2);
+        assert_eq!(channel.write(b"ab").unwrap(), 2);
+        assert_eq!(host.ret(), (1, 0, b"ab".to_vec()));
+
+        // Between two reads, data waits for the next one.
+        assert_eq!(channel.write(b"cd").unwrap(), 2);
+        host.submit(3, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        assert_eq!(host.ret(), (3, 0, b"cd".to_vec()));
+
+        // Program closes while data waits; the cancel crosses the completion of read 3.
+        assert_eq!(channel.write(b"ef").unwrap(), 2);
+        host.unlink(4, 3);
+        assert_eq!(ret_out(&mut host), (4, 0));
+        assert!(!dev.is_port_open());
+        assert_eq!(channel.write(b"lost").unwrap(), 4);
+
+        // The next program starts clean.
+        host.submit(5, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.sync(6);
+        assert!(dev.is_port_open());
+        assert_eq!(channel.write(b"new").unwrap(), 3);
+        assert_eq!(host.ret(), (5, 0, b"new".to_vec()));
     }
 
     #[test]
@@ -554,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_without_usb_connection_are_dropped() {
+    fn writes_without_program_are_dropped() {
         let server = UsbipServer::start().unwrap();
         let dev = server.add_device("SLTEST3");
         let channel = dev.open_control().unwrap();

@@ -79,9 +79,9 @@ impl VirtualDevice {
         self.state.lock().conn.is_some()
     }
 
-    /// A program has the COM port open (DTR raised).
+    /// Active while USB is connected; CDC has no reliable app open/close notification.
     pub fn is_port_open(&self) -> bool {
-        self.state.lock().cdc.port_open()
+        self.is_attached()
     }
 
     /// Closes the client connection, which unplugs the device.
@@ -237,10 +237,11 @@ impl ControlChannel for DeviceChannel {
 
     fn write(&self, data: &[u8]) -> io::Result<usize> {
         let mut st = self.0.state.lock();
-        if st.conn.is_none() || !st.cdc.port_open() {
-            // Nothing listening: accept and drop, like an unplugged cable.
+        if st.conn.is_none() {
+            // USB disconnected: accept and drop, like an unplugged cable.
             return Ok(data.len());
         }
+        // DTR is a control signal, not a prerequisite for receiving data.
         let room = BUFFER_LIMIT.saturating_sub(st.to_host.len());
         let n = room.min(data.len());
         st.to_host.extend(&data[..n]);
@@ -252,7 +253,8 @@ impl ControlChannel for DeviceChannel {
         let st = self.0.state.lock();
         Some(ControlState {
             version: serialloom_proto::PORT_STATE_VERSION,
-            com_open: u32::from(st.cdc.port_open()),
+            // Keep the port active independently of the application's DTR setting.
+            com_open: u32::from(st.conn.is_some()),
             baud_rate: st.cdc.line.baud_rate,
             data_bits: st.cdc.line.data_bits,
             parity: st.cdc.line.parity,
@@ -492,10 +494,12 @@ mod tests {
         host.submit(2, p::DIR_OUT, 0, 0, [0x00, 9, 1, 0, 0, 0, 0, 0], &[]);
         assert_eq!(ret_out(&mut host), (2, 0));
 
-        // Program opens the port: DTR + RTS.
-        host.submit(3, p::DIR_OUT, 0, 0, [0x21, 0x22, 3, 0, 0, 0, 0, 0], &[]);
+        // Program opens the port without asserting DTR or RTS.
+        host.submit(3, p::DIR_OUT, 0, 0, [0x21, 0x22, 0, 0, 0, 0, 0, 0], &[]);
         assert_eq!(ret_out(&mut host), (3, 0));
         assert!(dev.is_port_open());
+        assert_eq!(channel.state().unwrap().com_open, 1);
+        assert_eq!(channel.state().unwrap().dtr_rts, 0);
 
         // Program writes "hi": SerialLoom reads it.
         host.submit(4, p::DIR_OUT, cdc::EP_DATA_OUT, 2, [0; 8], b"hi");
@@ -524,6 +528,10 @@ mod tests {
         // Unsupported request stalls.
         host.submit(8, p::DIR_IN, 0, 10, [0x80, 6, 0, 6, 0, 0, 10, 0], &[]);
         assert_eq!(ret_out(&mut host), (8, p::EPIPE));
+
+        dev.disconnect();
+        assert!(!dev.is_port_open());
+        assert_eq!(channel.state().unwrap().com_open, 0);
     }
 
     #[test]
@@ -546,7 +554,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_without_program_are_dropped() {
+    fn writes_without_usb_connection_are_dropped() {
         let server = UsbipServer::start().unwrap();
         let dev = server.add_device("SLTEST3");
         let channel = dev.open_control().unwrap();

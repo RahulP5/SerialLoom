@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { CircleAlert, CircleCheck, Monitor, Moon, PanelBottom, Sun } from "lucide-react";
+import { CircleAlert, CircleArrowUp, CircleCheck, Monitor, Moon, PanelBottom, Sun } from "lucide-react";
 import clsx from "clsx";
 import { useStore } from "../../store";
 import type { AppSettings, DriverKind } from "../../lib/types";
 import { DriverMissing } from "./ListViews";
 import { useTheme, type ThemePref } from "../../lib/theme";
+import { useUpdates } from "../../lib/updates";
 
 const THEMES: { id: ThemePref; label: string; icon: typeof Sun }[] = [
   { id: "system", label: "Same as Windows", icon: Monitor },
@@ -26,7 +27,9 @@ export function SettingsView() {
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
           <h1 className="text-xl font-semibold text-ink-0">Settings</h1>
-          <p className="mt-1 text-sm text-ink-300">Appearance, running in the background, and where virtual ports come from.</p>
+          <p className="mt-1 text-sm text-ink-300">
+            Appearance, running in the background, updates, and where virtual ports come from.
+          </p>
         </div>
 
         <Appearance />
@@ -43,6 +46,8 @@ export function SettingsView() {
             To stop all ports and exit, right-click the icon and choose <b className="text-ink-100">Quit SerialLoom</b>.
           </p>
         </section>
+
+        <Updates />
 
         <section className="panel p-5">
           <h2 className="font-semibold text-ink-0">Virtual port driver</h2>
@@ -132,6 +137,31 @@ function Appearance() {
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+function Updates() {
+  const { enabled, setEnabled } = useUpdates();
+  return (
+    <section className="panel p-5">
+      <h2 className="flex items-center gap-2 font-semibold text-ink-0">
+        <CircleArrowUp size={16} className="text-cyan-300" /> Updates
+      </h2>
+      <p className="mt-1.5 text-sm text-ink-300">
+        When a new version is out, a notice in the bottom-left corner links to the download page. To find out,
+        SerialLoom asks GitHub for its latest release when it starts and once a day. The request contains no personal
+        data, and nothing is installed without you.
+      </p>
+      <label className="mt-3 flex items-center gap-2 text-sm text-ink-100">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="accent-loom-500"
+        />
+        Check for new versions
+      </label>
     </section>
   );
 }

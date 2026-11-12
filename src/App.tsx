@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   Cable,
   CircleAlert,
+  CircleArrowUp,
   CircleCheck,
   Download,
   Info,
@@ -16,8 +17,10 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useStore, type View } from "./store";
-import { api } from "./lib/api";
+import { api, openExternal } from "./lib/api";
 import { useTheme } from "./lib/theme";
+import { useUpdateChecks, useUpdates } from "./lib/updates";
+import { WEBSITE } from "./lib/project";
 import { TopologyView } from "./components/views/TopologyView";
 import { PortsView, VirtualPortsView } from "./components/views/ListViews";
 import { SettingsView } from "./components/views/SettingsView";
@@ -72,6 +75,7 @@ export default function App() {
 function Sidebar() {
   const { view, setView, refresh, hubs, info } = useStore();
   const running = hubs.filter((h) => h.status.running).length;
+  useUpdateChecks(info?.version);
 
   return (
     <nav className="flex w-[212px] shrink-0 flex-col border-r border-ink-700/70 bg-ink-950/70">
@@ -98,6 +102,7 @@ function Sidebar() {
         ))}
       </div>
       <div className="mt-auto space-y-2 px-4 pb-4 text-[11px] text-ink-400">
+        <UpdateNotice />
         <div className="flex items-center gap-2">
           <span className={clsx("h-2 w-2 rounded-full", running ? "bg-emerald-400" : "bg-ink-500")} />
           {running} of {hubs.length} hub{hubs.length === 1 ? "" : "s"} running
@@ -113,6 +118,37 @@ function Sidebar() {
         </div>
       </div>
     </nav>
+  );
+}
+
+function UpdateNotice() {
+  const { available, dismiss } = useUpdates();
+  if (!available) return null;
+  return (
+    <div className="-mx-1 mb-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-2.5" role="status">
+      <div className="flex items-start gap-2">
+        <CircleArrowUp size={14} className="mt-px shrink-0 text-cyan-300" />
+        <span className="flex-1 text-xs leading-snug font-medium text-ink-0">
+          SerialLoom {available.version} is available
+        </span>
+        <button
+          className="text-ink-400 hover:text-ink-0"
+          onClick={dismiss}
+          aria-label="Dismiss"
+          title="Hide until the next version"
+        >
+          <X size={13} />
+        </button>
+      </div>
+      <div className="mt-1.5 flex gap-3 pl-[22px]">
+        <button className="font-medium text-cyan-300 hover:underline" onClick={() => openExternal(WEBSITE.download)}>
+          Download
+        </button>
+        <button className="text-ink-300 hover:text-ink-100 hover:underline" onClick={() => openExternal(available.notesUrl)}>
+          What's new
+        </button>
+      </div>
+    </div>
   );
 }
 

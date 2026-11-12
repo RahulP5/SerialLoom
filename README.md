@@ -46,6 +46,8 @@ Download the latest installer from [Releases](https://github.com/RahulP5/SerialL
 
 Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
 
+SerialLoom shows a notice when a new version is out. To find out, it asks GitHub for the latest release when it starts and once a day; the request contains no personal data. Turn it off under *Settings > Updates*.
+
 > Virtual COM ports work on any Windows 10/11 PC with no test mode. SerialLoom presents each port to Windows as a software USB serial device, served by Windows' own driver through a bundled, Microsoft-signed virtual USB controller ([usbip-win2](https://github.com/vadimgrn/usbip-win2), BSD-2-Clause). See [docs/USB_PORTS.md](docs/USB_PORTS.md). The installer itself is not code-signed yet, so Windows SmartScreen may ask you to confirm (*More info* > *Run anyway*).
 
 ## Quick start

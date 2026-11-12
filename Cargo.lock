@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "serialloom"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "parking_lot",
  "serde",
@@ -3169,7 +3169,7 @@ dependencies = [
 
 [[package]]
 name = "serialloom-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "parking_lot",
  "serde",

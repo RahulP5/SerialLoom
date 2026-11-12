@@ -42,6 +42,11 @@ jobs:
           releaseBody: |
             **Virtual COM port manager for Windows** - create, pair, split, join and bridge serial ports with a live visual editor.
 
+            ### What's new in 0.1.2
+            - Fixed: programs that open a virtual port without raising DTR (for example Xshell) now receive data. Thanks to @xfan1024 for the report and the fix (#11, #12).
+            - Virtual ports now reliably detect when a program opens or closes them, whatever its DTR setting.
+            - Updated dependencies.
+
             ### Highlights
             - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)
             - Virtual null-modem pairs, port splitting and joining, and bridging serial ports to TCP

@@ -42,10 +42,11 @@ jobs:
           releaseBody: |
             **Virtual COM port manager for Windows** - create, pair, split, join and bridge serial ports with a live visual editor.
 
-            ### What's new in 0.1.2
-            - Fixed: programs that open a virtual port without raising DTR (for example Xshell) now receive data. Thanks to @xfan1024 for the report and the fix (#11, #12).
-            - Virtual ports now reliably detect when a program opens or closes them, whatever its DTR setting.
-            - Updated dependencies.
+            ### What's new in 0.2.0
+            - **Automation:** test scripts and tools can create a virtual null-modem pair, use it and delete it again with the new `serialloom-cli` (installed next to SerialLoom) or a local JSON API. Thanks to @ying-zi-pro for the suggestion (#13). Turn it on in *Settings > Automation*; only your own Windows account can use it. See [docs/AUTOMATION.md](https://github.com/RahulP5/SerialLoom/blob/main/docs/AUTOMATION.md).
+            - **No more repeated administrator prompts:** the new SerialLoom Helper service creates, renumbers and removes SerialLoom's own ports without asking each time. It runs only when needed and can be removed in *Settings > Administrator permission*.
+            - SerialLoom can start in the background when you sign in (*Settings > Running in the background*), and `serialloom-cli` starts it on demand.
+            - A notice in the corner tells you when a new version is out (can be turned off in *Settings > Updates*).
 
             ### Highlights
             - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)
@@ -55,6 +56,7 @@ jobs:
             - Runs in the notification area: closing the window keeps ports open, *Quit SerialLoom* in the tray menu closes them
             - Shows the baud rate and framing each program chose on its virtual port
             - Light and dark themes (or follow Windows)
+            - Scriptable: `serialloom-cli pair` gives a test run its own ports, with no administrator prompts
 
             ### Install
             Download **SerialLoom_*_x64-setup.exe** below and run it. Windows 10 (1803+) or Windows 11, x64. No test mode or extra drivers needed.

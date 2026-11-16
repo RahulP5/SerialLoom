@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import { DEFAULT_SERIAL } from "./types";
 
-let settings: AppSettings = { driver: "demo" };
+let settings: AppSettings = { driver: "demo", automation: false, startWithWindows: false };
 const virtualPorts: VirtualPortInfo[] = [];
 const hubs: HubView[] = [];
 const statusListeners = new Set<(s: HubStatus[]) => void>();
@@ -262,5 +262,20 @@ export const mockApi: Api = {
   onStatus: async (cb) => {
     statusListeners.add(cb);
     return () => statusListeners.delete(cb);
+  },
+  onTopologyChanged: async () => () => {},
+  automationInfo: () =>
+    delay({
+      running: settings.automation,
+      pipe: settings.automation ? "\\\\.\\pipe\\SerialLoom.Automation.S-1-5-21-0000000000-1001" : null,
+      error: null,
+      cliPath: settings.automation ? "C:\\Program Files\\SerialLoom\\serialloom-cli.exe" : null,
+    }),
+  helperStatus: () => delay({ supported: false, installed: false, running: false }),
+  installHelper: async () => {
+    throw "SerialLoom Helper is not available in the browser preview";
+  },
+  removeHelper: async () => {
+    throw "SerialLoom Helper is not available in the browser preview";
   },
 };

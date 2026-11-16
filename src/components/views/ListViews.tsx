@@ -168,7 +168,7 @@ export function VirtualPortsView() {
                       title="Remove port"
                       onClick={() =>
                         run(
-                          "Removing port (Windows asks for administrator permission)",
+                          useStore.getState().adminNote("Removing port"),
                           () => api.removeVirtualPort(p.name),
                           `${p.name} removed`,
                         )
@@ -242,7 +242,7 @@ function ChangeNumber({ port }: { port: string }) {
     const target = value.trim().toUpperCase();
     if (!target || target === port) return setEditing(false);
     const ok = await run(
-      "Changing COM number (Windows asks for administrator permission)",
+      useStore.getState().adminNote("Changing COM number"),
       () => api.renameVirtualPort(port, target),
       `${port} is now ${target}`,
     );

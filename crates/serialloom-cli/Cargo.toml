@@ -1,0 +1,21 @@
+[package]
+name = "serialloom-cli"
+description = "Command-line control for a running SerialLoom: create virtual COM port pairs from scripts and tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "serialloom-cli"
+path = "src/main.rs"
+
+[dependencies]
+serialloom-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }

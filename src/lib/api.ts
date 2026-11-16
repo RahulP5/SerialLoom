@@ -4,9 +4,11 @@ import { mockApi } from "./mock";
 import type {
   AppInfo,
   AppSettings,
+  AutomationInfo,
   CreateHubRequest,
   DriverInfo,
   EndpointRequest,
+  HelperInfo,
   HubStatus,
   HubView,
   MonitorRecord,
@@ -37,6 +39,12 @@ export interface Api {
   removeMember(id: string, index: number, removeVirtualPort: boolean): Promise<HubView>;
   hubMonitor(id: string, after: number): Promise<MonitorRecord[]>;
   onStatus(cb: (status: HubStatus[]) => void): Promise<UnlistenFn>;
+  /** Another program changed ports or connections through the automation API. */
+  onTopologyChanged(cb: () => void): Promise<UnlistenFn>;
+  automationInfo(): Promise<AutomationInfo>;
+  helperStatus(): Promise<HelperInfo>;
+  installHelper(): Promise<HelperInfo>;
+  removeHelper(): Promise<HelperInfo>;
 }
 
 const tauriApi: Api = {
@@ -62,6 +70,11 @@ const tauriApi: Api = {
     invoke("remove_member", { id, index, removeVirtualPort }),
   hubMonitor: (id, after) => invoke("hub_monitor", { id, after }),
   onStatus: (cb) => listen<HubStatus[]>("hub-status", (e) => cb(e.payload)),
+  onTopologyChanged: (cb) => listen("topology-changed", () => cb()),
+  automationInfo: () => invoke("automation_info"),
+  helperStatus: () => invoke("helper_status"),
+  installHelper: () => invoke("install_helper"),
+  removeHelper: () => invoke("remove_helper"),
 };
 
 /** True inside the desktop app; false in a plain browser (`npm run dev`). */

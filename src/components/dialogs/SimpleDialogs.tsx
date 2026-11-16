@@ -6,7 +6,7 @@ import { useStore } from "../../store";
 import { api, errorText } from "../../lib/api";
 import type { EndpointRequest } from "../../lib/types";
 
-const ADMIN_NOTE = "Creating ports (Windows asks for administrator permission)";
+const adminNote = () => useStore.getState().adminNote("Creating ports");
 
 /** Real (non-virtual) port currently using this COM name, if any. */
 function useTakenBy(name: string) {
@@ -51,7 +51,7 @@ export function PairDialog({ onClose }: { onClose: () => void }) {
   const [b, setB] = useState("COM#");
 
   const submit = async () => {
-    const hub = await run(ADMIN_NOTE, () =>
+    const hub = await run(adminNote(), () =>
       api.createHub({
         name: "Virtual null-modem",
         kind: "bridge",
@@ -119,7 +119,7 @@ export function VirtualPortDialog({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("COM#");
 
   const submit = async () => {
-    const created = await run(ADMIN_NOTE, () => api.createVirtualPorts([name.trim()]));
+    const created = await run(adminNote(), () => api.createVirtualPorts([name.trim()]));
     if (created) {
       useStore.getState().toast("success", `Created ${created.map((p) => p.name).join(", ")}`);
       onClose();
@@ -163,7 +163,7 @@ export function AddMemberDialog({
   if (!hub) return null;
 
   const submit = async () => {
-    const label = value.kind === "newVirtual" ? ADMIN_NOTE : "Adding endpoint";
+    const label = value.kind === "newVirtual" ? adminNote() : "Adding endpoint";
     const ok = await run(label, () => api.addMember(hubId, value), `Added to "${hub.spec.name}"`);
     if (ok) onClose();
   };

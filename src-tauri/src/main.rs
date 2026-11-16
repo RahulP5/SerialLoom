@@ -11,6 +11,11 @@ fn main() {
             serialloom_core::logging::init("admin");
             std::process::exit(serialloom_core::driver::native::admin_main(&args[1..]));
         }
+        // Started by Windows as the SerialLoom Helper service.
+        if args.first().map(String::as_str) == Some(serialloom_core::driver::native::SERVICE_FLAG) {
+            serialloom_core::logging::init("helper");
+            std::process::exit(serialloom_core::driver::native::service_entry());
+        }
     }
     serialloom_lib::run()
 }

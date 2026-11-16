@@ -9,7 +9,13 @@
 //!   Splitting, joining, bridging and bus sharing are all hubs with different
 //!   routing rules.
 //! * [`engine`]: owns the hubs, persists the topology and joins the two layers.
+//! * `automation` (Windows): the local API other programs use to control
+//!   the running app, and its client.
 
+#[cfg(windows)]
+pub mod automation;
+#[cfg(windows)]
+pub mod autostart;
 pub mod config;
 pub mod driver;
 pub mod engine;
@@ -19,6 +25,8 @@ pub mod logging;
 pub mod model;
 pub mod ports;
 pub mod usbip;
+#[cfg(windows)]
+pub mod winpipe;
 
 pub use engine::Engine;
 pub use error::{Error, Result};

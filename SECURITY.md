@@ -15,6 +15,8 @@ You will get an answer within 7 days. We will tell you when a fix ships and cred
 ## Areas of interest
 
 - The elevated helper (`serialloom.exe --serialloom-admin`) and its argument handling
+- SerialLoom Helper, the on-demand service (`--serialloom-service`, `driver/native/helper.rs`): its pipe security, caller checks and the operations it allows ([docs/AUTOMATION.md](docs/AUTOMATION.md#serialloom-helper))
+- The automation API (`automation.rs`, `winpipe.rs`): per-user pipe access, request parsing and limits
 - Per-PC driver signing (`localsign.rs`): the catalog hash check and private-key deletion
 - The driver (`drivers/serialloom-port`): request handling, buffer bounds, access control between the COM side and the control side
 - The TCP endpoints. They have no authentication; bind them to trusted networks only.

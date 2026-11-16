@@ -32,7 +32,7 @@ function defaults(kind: HubKind, firstFree?: string): Pick<CreateHubRequest, "ma
 }
 
 export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubRequest>; onClose: () => void }) {
-  const { ports, run, select, busy } = useStore();
+  const { ports, run, select, busy, helper } = useStore();
   const firstFree = ports.find((p) => !p.inUseBy && p.kind !== "virtual")?.name;
 
   const initialKind = preset?.kind ?? "split";
@@ -94,7 +94,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
         <>
           <span className="mr-auto self-center text-xs text-ink-400">
             {virtualCount > 0 &&
-              `${virtualCount} virtual port${virtualCount > 1 ? "s" : ""} will be created. Windows asks for administrator approval once.`}
+              `${virtualCount} virtual port${virtualCount > 1 ? "s" : ""} will be created.${helper?.installed ? "" : " Windows asks for administrator approval once."}`}
           </span>
           <button className="btn-ghost" onClick={onClose}>
             Cancel

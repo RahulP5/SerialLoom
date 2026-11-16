@@ -15,6 +15,7 @@ SerialLoom has three layers: a driver that creates COM ports, an engine that mov
 │   ├─ topology.json persistence, autostart                                              │
 │   └─ PortDriver ── NativeDriver (SetupAPI, ComDB, UAC helper, control channel)         │
 │                 └─ DemoDriver   (in-memory, for previews and tests)                    │
+│  automation API (\\.\pipe\SerialLoom.Automation.<SID>) ◄── serialloom-cli, scripts     │
 └────────────────────────────────────────────────────────────────────────────────────────┘
                  │ control side (\\?\ROOT#PORTS#…\control)
                  ▼
@@ -41,7 +42,11 @@ A running hub starts one thread per endpoint. Each thread owns its connection: i
 
 ## Elevation
 
-Creating or removing virtual ports and installing the driver need administrator rights. The engine never runs elevated itself. It relaunches `serialloom.exe --serialloom-admin …` through UAC for that one operation. See [DRIVER.md](DRIVER.md#creating-and-removing-ports) for how that step is kept safe.
+Creating or removing virtual ports and installing the driver need administrator rights. The engine never runs elevated itself. For port operations it first asks **SerialLoom Helper**, a small on-demand Windows service (`serialloom.exe --serialloom-service`) registered by the installer, over the pipe `\\.\pipe\SerialLoom.Helper`. When the helper is not installed, and always for driver installation, it relaunches `serialloom.exe --serialloom-admin …` through UAC for that one operation. Both paths parse and validate requests with the same code. See [AUTOMATION.md](AUTOMATION.md#serialloom-helper) for the helper's limits and [DRIVER.md](DRIVER.md#creating-and-removing-ports) for how the elevated step is kept safe.
+
+## Automation
+
+When turned on in *Settings*, the app serves a local API on `\\.\pipe\SerialLoom.Automation.<user SID>` (one JSON request per line), restricted to the same Windows user. `serialloom-cli` is a thin client for it. Commands run on the same `Engine` as the UI, and the UI refreshes on a `topology-changed` event. See [AUTOMATION.md](AUTOMATION.md).
 
 ## Frontend
 

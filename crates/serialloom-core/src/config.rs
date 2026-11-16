@@ -33,6 +33,12 @@ pub struct AppSettings {
     /// have no such field and count as version 1.
     #[serde(default = "version_one")]
     pub version: u32,
+    /// Lets other programs of this Windows user control SerialLoom through
+    /// the automation API (`serialloom-cli`, test scripts). Off by default.
+    pub automation: bool,
+    /// Start SerialLoom in the background when the user signs in. The
+    /// Windows startup list is the source of truth; the app reads it back.
+    pub start_with_windows: bool,
 }
 
 /// Current settings format.
@@ -51,6 +57,8 @@ impl Default for AppSettings {
                 DriverKind::Demo
             },
             version: SETTINGS_VERSION,
+            automation: false,
+            start_with_windows: false,
         }
     }
 }
@@ -126,9 +134,21 @@ mod tests {
         let mut chosen = AppSettings {
             driver: DriverKind::Native,
             version: SETTINGS_VERSION,
+            automation: false,
+            start_with_windows: false,
         };
         assert!(!chosen.migrate());
         assert_eq!(chosen.driver, DriverKind::Native);
+    }
+
+    #[test]
+    fn automation_is_off_unless_turned_on() {
+        assert!(!AppSettings::default().automation);
+        let old: AppSettings = serde_json::from_str(r#"{"driver":"usb","version":2}"#).unwrap();
+        assert!(!old.automation);
+        let on: AppSettings =
+            serde_json::from_str(r#"{"driver":"usb","version":2,"automation":true}"#).unwrap();
+        assert!(on.automation);
     }
 
     #[test]

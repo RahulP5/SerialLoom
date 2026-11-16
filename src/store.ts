@@ -6,6 +6,7 @@ import type {
   CreateHubRequest,
   DriverInfo,
   EndpointRequest,
+  HelperInfo,
   HubStatus,
   HubView,
   PortInfo,
@@ -41,6 +42,7 @@ interface State {
   info?: AppInfo;
   driver?: DriverInfo;
   settings?: AppSettings;
+  helper?: HelperInfo;
   ports: PortInfo[];
   virtualPorts: VirtualPortInfo[];
   hubs: HubView[];
@@ -62,6 +64,9 @@ interface State {
   /** Runs an action with a busy indicator and error toast; returns undefined on failure. */
   run<T>(label: string, fn: () => Promise<T>, success?: string): Promise<T | undefined>;
   saveSettings(s: AppSettings): Promise<void>;
+  refreshHelper(): Promise<void>;
+  /** Busy label for an action that needs administrator rights. */
+  adminNote(action: string): string;
 }
 
 let lastStatus: { at: number; byHub: Record<string, HubStatus> } = { at: 0, byHub: {} };
@@ -101,7 +106,22 @@ export const useStore = create<State>((set, get) => ({
       get().toast("error", errorText(e));
     }
     await get().refresh();
+    await get().refreshHelper();
     await api.onStatus((list) => get().applyStatus(list));
+    // Test scripts and other programs can change ports through the automation API.
+    await api.onTopologyChanged(() => get().refresh());
+  },
+
+  async refreshHelper() {
+    try {
+      set({ helper: await api.helperStatus() });
+    } catch {
+      set({ helper: undefined });
+    }
+  },
+
+  adminNote(action) {
+    return get().helper?.installed ? action : `${action} (Windows asks for administrator permission)`;
   },
 
   async refresh() {

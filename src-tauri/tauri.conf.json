@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build && cargo build --release -p serialloom-cli",
     "frontendDist": "../dist"
   },
   "app": {
@@ -20,6 +20,7 @@
         "minHeight": 560,
         "center": true,
         "dragDropEnabled": false,
+        "visible": false,
         "backgroundColor": "#0b0f1a"
       }
     ],

@@ -5,6 +5,10 @@
 //! elevated process acts on comes from its command line, which cannot change
 //! after the user approves the prompt, and is validated again here. The
 //! driver INF is located by the elevated process itself, never passed in.
+//!
+//! Port operations go to the SerialLoom Helper service first when it is
+//! installed (see [`super::helper`]), so they need no prompt at all; the UAC
+//! prompt is the fallback.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +20,7 @@ use windows_sys::Win32::UI::Shell::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-use super::{localsign, setup};
+use super::{helper, localsign, setup};
 use crate::driver::validate_port_name;
 use crate::error::{Error, Result};
 use crate::model::VirtualPortInfo;
@@ -35,15 +39,22 @@ pub enum AdminOp {
     RenameUsbPorts(Vec<(String, String)>),
     /// Removes virtual USB devices (by serial number) from Windows completely.
     RemoveUsbDevices(Vec<String>),
-    /// Used by the uninstaller: removes every port and the driver package.
+    /// Registers the SerialLoom Helper service (installer, or Settings).
+    InstallService,
+    /// Removes the SerialLoom Helper service.
+    UninstallService,
+    /// Used by the uninstaller: removes every port, the helper service and
+    /// the driver package.
     UninstallAll,
 }
 
 impl AdminOp {
-    fn to_args(&self) -> Vec<String> {
+    pub(crate) fn to_args(&self) -> Vec<String> {
         match self {
             AdminOp::InstallDriver => vec!["install-driver".into()],
             AdminOp::InstallUsbip => vec!["install-usb".into()],
+            AdminOp::InstallService => vec!["install-service".into()],
+            AdminOp::UninstallService => vec!["uninstall-service".into()],
             AdminOp::UninstallAll => vec!["uninstall-all".into()],
             AdminOp::CreatePorts(names) => std::iter::once("create".to_string())
                 .chain(names.iter().cloned())
@@ -60,7 +71,7 @@ impl AdminOp {
         }
     }
 
-    fn parse(args: &[String]) -> Result<Self> {
+    pub(crate) fn parse(args: &[String]) -> Result<Self> {
         let names = || -> Result<Vec<String>> {
             let names: Vec<String> = args[1..].iter().map(|s| s.to_ascii_uppercase()).collect();
             if names.is_empty() || names.len() > 64 {
@@ -75,6 +86,8 @@ impl AdminOp {
             Some("install-driver") if args.len() == 1 => Ok(AdminOp::InstallDriver),
             Some("install-usb") if args.len() == 1 => Ok(AdminOp::InstallUsbip),
             Some("uninstall-all") if args.len() == 1 => Ok(AdminOp::UninstallAll),
+            Some("install-service") if args.len() == 1 => Ok(AdminOp::InstallService),
+            Some("uninstall-service") if args.len() == 1 => Ok(AdminOp::UninstallService),
             Some("create") => Ok(AdminOp::CreatePorts(names()?)),
             Some("remove") => Ok(AdminOp::RemovePorts(names()?)),
             Some("remove-usb") => {
@@ -125,9 +138,14 @@ fn validate_usb_serial(serial: &str) -> Result<()> {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct Reply {
-    error: Option<String>,
-    ports: Vec<VirtualPortInfo>,
+pub(crate) struct Reply {
+    pub(crate) error: Option<String>,
+    pub(crate) ports: Vec<VirtualPortInfo>,
+    /// SerialLoom Helper turned the request down without running it (for
+    /// example a SerialLoom copy other than the installed one asked), so
+    /// the caller may still ask through UAC.
+    #[serde(default)]
+    pub(crate) refused: bool,
 }
 
 pub fn is_elevated() -> bool {
@@ -151,7 +169,7 @@ pub fn bundled_inf() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
-fn execute(op: &AdminOp) -> Result<Vec<VirtualPortInfo>> {
+pub(crate) fn execute(op: &AdminOp) -> Result<Vec<VirtualPortInfo>> {
     match op {
         AdminOp::InstallDriver => {
             let inf = bundled_inf().ok_or_else(|| {
@@ -198,7 +216,18 @@ fn execute(op: &AdminOp) -> Result<Vec<VirtualPortInfo>> {
             }
             Ok(Vec::new())
         }
+        AdminOp::InstallService => {
+            helper::install()?;
+            Ok(Vec::new())
+        }
+        AdminOp::UninstallService => {
+            helper::uninstall()?;
+            Ok(Vec::new())
+        }
         AdminOp::UninstallAll => {
+            if let Err(e) = helper::uninstall() {
+                tracing::warn!("{e}");
+            }
             for p in setup::list()? {
                 let _ = setup::remove(&p.name);
             }
@@ -211,10 +240,15 @@ fn execute(op: &AdminOp) -> Result<Vec<VirtualPortInfo>> {
     }
 }
 
-/// Runs `op`, asking for elevation through UAC when needed.
+/// Runs `op` as administrator: directly when already elevated, through the
+/// SerialLoom Helper service when it is installed and the operation is one
+/// it performs, and otherwise through a UAC prompt.
 pub fn run(op: AdminOp) -> Result<Vec<VirtualPortInfo>> {
     if is_elevated() {
         return execute(&op);
+    }
+    if let Some(result) = helper::call(&op) {
+        return result;
     }
 
     let stamp = std::time::SystemTime::now()
@@ -301,10 +335,15 @@ pub fn admin_main(args: &[String]) -> i32 {
     };
     tracing::info!("admin operation: {op_args:?}");
     let reply = match AdminOp::parse(op_args).and_then(|op| execute(&op)) {
-        Ok(ports) => Reply { error: None, ports },
+        Ok(ports) => Reply {
+            error: None,
+            ports,
+            refused: false,
+        },
         Err(e) => Reply {
             error: Some(e.to_string()),
             ports: Vec::new(),
+            refused: false,
         },
     };
     match &reply.error {
@@ -363,6 +402,12 @@ mod tests {
         assert!(AdminOp::parse(&s(&["create", "COM1 & calc"])).is_err());
         assert!(AdminOp::parse(&s(&["install-driver", "C:\\evil.inf"])).is_err());
         assert!(AdminOp::parse(&s(&["format-c"])).is_err());
+        assert_eq!(
+            AdminOp::parse(&s(&["install-service"])).unwrap(),
+            AdminOp::InstallService
+        );
+        assert!(AdminOp::parse(&s(&["install-service", "C:\\evil.exe"])).is_err());
+        assert!(AdminOp::parse(&s(&["uninstall-service", "x"])).is_err());
     }
 
     #[test]

@@ -141,6 +141,20 @@ fn find_port_device(serial: &str) -> Option<(DevInfo, SP_DEVINFO_DATA)> {
     None
 }
 
+/// True when the COM port device `devinst` belongs to SerialLoom's virtual
+/// USB device `serial`: its parent (or itself) has SerialLoom's VID/PID and
+/// exactly that serial number.
+fn is_serialloom_port(devinst: u32, serial: &str) -> bool {
+    let ours = |id: Option<String>| {
+        id.and_then(|id| our_serial_of(&id))
+            .is_some_and(|s| s.eq_ignore_ascii_case(serial))
+    };
+    let mut parent = 0u32;
+    // SAFETY: out-pointer to a devinst.
+    let has_parent = unsafe { CM_Get_Parent(&mut parent, devinst, 0) } == CR_SUCCESS;
+    (has_parent && ours(device_id(parent))) || ours(device_id(devinst))
+}
+
 /// COM name Windows gave the virtual device with USB serial number `serial`.
 pub fn com_port_for_serial(serial: &str) -> Option<String> {
     let (set, data) = find_port_device(serial)?;
@@ -188,6 +202,11 @@ pub fn rename_port(serial: &str, new_name: &str) -> Result<()> {
         com_number(new_name).ok_or_else(|| Error::Invalid(format!("'{new_name}' is not a COM port name")))?;
     let (set, mut data) =
         find_port_device(serial).ok_or_else(|| Error::NotFound(format!("virtual device {serial}")))?;
+    // Only ever renumber SerialLoom's own devices (USB ID and serial), never
+    // a real adapter that happens to share the serial number.
+    if !is_serialloom_port(data.DevInst, serial) {
+        return Err(Error::NotFound(format!("SerialLoom virtual device {serial}")));
+    }
     let old = read_port_name(&set, &data);
     if old.as_deref().is_some_and(|o| o.eq_ignore_ascii_case(new_name)) {
         return Ok(());

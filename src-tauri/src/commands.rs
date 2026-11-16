@@ -8,9 +8,10 @@ use serde::Serialize;
 use serialloom_core::config::{AppSettings, save_json};
 use serialloom_core::model::*;
 use serialloom_core::{Engine, Result as CoreResult};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::AppState;
+use crate::automation::AutomationInfo;
 
 type CmdResult<T> = Result<T, String>;
 
@@ -47,18 +48,35 @@ pub fn app_info() -> AppInfo {
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> AppSettings {
-    state.settings.lock().clone()
+    let mut settings = state.settings.lock().clone();
+    // The Windows startup list is the truth (Task Manager can change it).
+    #[cfg(windows)]
+    {
+        settings.start_with_windows = serialloom_core::autostart::is_enabled();
+    }
+    settings
 }
 
 #[tauri::command]
-pub async fn set_settings(state: State<'_, AppState>, mut settings: AppSettings) -> CmdResult<DriverInfo> {
+pub async fn set_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut settings: AppSettings,
+) -> CmdResult<DriverInfo> {
     // Choices made in the UI are current-format settings; never migrate them later.
     settings.version = serialloom_core::config::SETTINGS_VERSION;
+    #[cfg(windows)]
+    if settings.start_with_windows != serialloom_core::autostart::is_enabled() {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        serialloom_core::autostart::set(settings.start_with_windows, &exe).map_err(|e| e.to_string())?;
+    }
     save_json(&state.settings_path, &settings).map_err(|e| e.to_string())?;
     let config_dir = state.settings_path.parent().unwrap_or(std::path::Path::new("."));
     let driver = settings.build_driver(config_dir);
+    let automation = settings.automation;
     *state.settings.lock() = settings;
     state.engine.set_driver(driver);
+    state.automation.apply(&app, &state.engine, automation);
     Ok(state.engine.driver_info())
 }
 
@@ -176,4 +194,75 @@ pub async fn hub_monitor(
     after: u64,
 ) -> CmdResult<Vec<MonitorRecord>> {
     blocking(&state, move |e| e.monitor(&id, after)).await
+}
+
+#[tauri::command]
+pub fn automation_info(state: State<'_, AppState>) -> AutomationInfo {
+    state.automation.info()
+}
+
+/// SerialLoom Helper: whether it is installed and running.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HelperInfo {
+    supported: bool,
+    installed: bool,
+    running: bool,
+}
+
+#[cfg(windows)]
+fn helper_info() -> HelperInfo {
+    let st = serialloom_core::driver::native::helper::status();
+    HelperInfo {
+        supported: true,
+        installed: st.installed,
+        running: st.running,
+    }
+}
+
+#[cfg(not(windows))]
+fn helper_info() -> HelperInfo {
+    HelperInfo::default()
+}
+
+#[tauri::command]
+pub async fn helper_status() -> CmdResult<HelperInfo> {
+    tauri::async_runtime::spawn_blocking(helper_info)
+        .await
+        .map_err(|e| format!("internal error: {e}"))
+}
+
+/// Installs or removes SerialLoom Helper. This always asks for administrator
+/// permission (UAC): the helper never installs or removes itself.
+async fn change_helper(install: bool) -> CmdResult<HelperInfo> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            use serialloom_core::driver::native::elevate::{AdminOp, run};
+            run(if install {
+                AdminOp::InstallService
+            } else {
+                AdminOp::UninstallService
+            })
+            .map_err(|e| e.to_string())?;
+            Ok(helper_info())
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = install;
+            Err("SerialLoom Helper is available on Windows only".to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("internal error: {e}"))?
+}
+
+#[tauri::command]
+pub async fn install_helper() -> CmdResult<HelperInfo> {
+    change_helper(true).await
+}
+
+#[tauri::command]
+pub async fn remove_helper() -> CmdResult<HelperInfo> {
+    change_helper(false).await
 }

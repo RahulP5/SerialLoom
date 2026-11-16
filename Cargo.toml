@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/serialloom-core", "crates/serialloom-proto", "crates/serialloom-port-logic", "src-tauri"]
+members = ["crates/serialloom-core", "crates/serialloom-proto", "crates/serialloom-port-logic", "crates/serialloom-cli", "src-tauri"]
 exclude = ["drivers"]
 
 [workspace.package]

@@ -2,6 +2,7 @@
 
 mod channel;
 pub mod elevate;
+pub mod helper;
 mod localsign;
 pub(crate) mod setup;
 
@@ -10,6 +11,7 @@ use crate::error::{Error, Result};
 use crate::model::{DriverInfo, VirtualPortInfo};
 
 pub use elevate::{ADMIN_FLAG, admin_main};
+pub use helper::{SERVICE_FLAG, service_entry};
 
 #[derive(Default)]
 pub struct NativeDriver;

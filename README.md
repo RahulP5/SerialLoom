@@ -37,12 +37,14 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 | **Live topology** | Drag ports onto the canvas, watch data flow, inspect bytes in the traffic monitor (ASCII or hex). |
 | **Any baud rate** | Programs pick any speed (300 to 12 Mbaud, standard or custom) and framing; the topology shows what each program chose. Virtual ports move data at full speed whatever the setting. Real ports use the speed you set for them. |
 | **Persistent** | Connections are saved and can start automatically with SerialLoom. |
-| **Runs in the background** | Closing the window keeps SerialLoom in the notification area, so ports stay open. *Quit SerialLoom* in the icon's menu closes every port. |
+| **Automation** | Test scripts and tools can create pairs and start, stop or delete connections with `serialloom-cli` or a local API ([docs/AUTOMATION.md](docs/AUTOMATION.md)); the CLI starts SerialLoom in the background when needed. Off until you turn it on; only your own Windows account can use it. |
+| **No repeated admin prompts** | The bundled SerialLoom Helper service creates, renumbers and removes SerialLoom's own ports without asking each time. |
+| **Runs in the background** | Closing the window keeps SerialLoom in the notification area, so ports stay open. It can also start there when you sign in. *Quit SerialLoom* in the icon's menu closes every port. |
 | **Light and dark themes** | Follows Windows, or choose one in *Settings*. |
 
 ## Install
 
-Download the latest installer from [Releases](https://github.com/RahulP5/SerialLoom/releases) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. Windows asks for administrator permission when you create, renumber or remove virtual ports.
+Download the latest installer from [Releases](https://github.com/RahulP5/SerialLoom/releases) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. The installer also registers SerialLoom Helper, a small service that creates, renumbers and removes SerialLoom's own virtual ports, so Windows does not ask for administrator permission each time. You can remove it in *Settings > Administrator permission*; Windows then asks for each change ([details](docs/AUTOMATION.md#serialloom-helper)).
 
 Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
 
@@ -78,6 +80,7 @@ To work on the UI only, run `npm run dev` and open http://localhost:1420. In a p
 crates/serialloom-core        routing engine, driver management, persistence (no UI)
 crates/serialloom-proto       contract shared by the driver and the app
 crates/serialloom-port-logic  serial port behaviour used by the driver (unit tested)
+crates/serialloom-cli         command-line control of the running app (serialloom-cli.exe)
 drivers/serialloom-port       UMDF 2 virtual serial port driver (Rust)
 src-tauri                     desktop shell and commands (Tauri 2)
 src                           React + TypeScript UI (React Flow, Tailwind)
@@ -91,7 +94,6 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit togethe
 - Run the routing engine as a Windows service, so connections keep working while the window is closed
 - Pass baud rate and modem lines through end to end (RFC 2217 for TCP)
 - Port renaming and per-port settings in the UI
-- Command-line interface for scripting
 - Linux support using pseudo-terminals
 
 ## Feedback

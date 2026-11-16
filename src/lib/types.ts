@@ -124,6 +124,25 @@ export type DriverKind = "usb" | "native" | "demo";
 
 export interface AppSettings {
   driver: DriverKind;
+  /** Lets other programs of this Windows user control SerialLoom (serialloom-cli, test scripts). */
+  automation: boolean;
+  /** Start SerialLoom in the background when the user signs in to Windows. */
+  startWithWindows: boolean;
+}
+
+/** SerialLoom Helper: the service that makes port changes without a UAC prompt each time. */
+export interface HelperInfo {
+  supported: boolean;
+  installed: boolean;
+  running: boolean;
+}
+
+export interface AutomationInfo {
+  running: boolean;
+  pipe: string | null;
+  error: string | null;
+  /** Full path of serialloom-cli.exe, when installed. */
+  cliPath: string | null;
 }
 
 export interface AppInfo {

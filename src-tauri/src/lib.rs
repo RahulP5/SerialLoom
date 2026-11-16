@@ -1,3 +1,4 @@
+mod automation;
 mod commands;
 mod tray;
 
@@ -14,23 +15,39 @@ pub struct AppState {
     pub engine: Arc<Engine>,
     pub settings: Mutex<AppSettings>,
     pub settings_path: PathBuf,
+    pub automation: automation::Automation,
 }
 
 /// How often live hub status is pushed to the UI.
 const STATUS_INTERVAL: Duration = Duration::from_millis(500);
 
+/// `serialloom.exe --background`: start in the notification area only, as
+/// at sign-in or when `serialloom-cli` starts SerialLoom for a script.
+const BACKGROUND_FLAG: &str = "--background";
+
+fn has_background_flag(args: &[String]) -> bool {
+    args.iter().any(|a| a == BACKGROUND_FLAG)
+}
+
 pub fn run() {
     serialloom_core::logging::init("app");
+    let background = has_background_flag(&std::env::args().collect::<Vec<_>>());
+    if background {
+        tracing::info!("starting in the background");
+    }
 
     let app = tauri::Builder::default()
         // Starting SerialLoom again (Start menu, shortcut) shows the running
-        // copy instead of starting a second one.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+        // copy instead of starting a second one. A background start (from
+        // serialloom-cli or sign-in) leaves the running copy as it is.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !has_background_flag(&args) {
+                tray::show_main_window(app);
+            }
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
             let dir = app.path().app_config_dir()?;
             std::fs::create_dir_all(&dir)?;
             let settings_path = dir.join("settings.json");
@@ -58,13 +75,22 @@ pub fn run() {
 
             if let Some(window) = app.get_webview_window("main") {
                 fit_to_work_area(&window);
+                // The window starts hidden (tauri.conf.json) so a background
+                // start never flashes it.
+                if !background {
+                    let _ = window.show();
+                }
             }
 
+            let automation_on = settings.automation;
             app.manage(AppState {
                 engine,
                 settings: Mutex::new(settings),
                 settings_path,
+                automation: automation::Automation::default(),
             });
+            let state = app.state::<AppState>();
+            state.automation.apply(app.handle(), &state.engine, automation_on);
             tray::create(app.handle())?;
             Ok(())
         })
@@ -99,6 +125,10 @@ pub fn run() {
             commands::add_member,
             commands::remove_member,
             commands::hub_monitor,
+            commands::automation_info,
+            commands::helper_status,
+            commands::install_helper,
+            commands::remove_helper,
         ])
         .build(tauri::generate_context!())
         .expect("error while building SerialLoom");
@@ -107,6 +137,7 @@ pub fn run() {
         if let RunEvent::Exit = event
             && let Some(state) = handle.try_state::<AppState>()
         {
+            state.automation.stop();
             state.engine.shutdown();
         }
     });

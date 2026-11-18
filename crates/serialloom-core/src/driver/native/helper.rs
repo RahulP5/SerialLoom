@@ -272,13 +272,19 @@ fn connect() -> Result<PipeStream> {
 /// result is always `Some`, so an operation never runs twice.
 pub fn call(op: &AdminOp) -> Option<Result<Vec<VirtualPortInfo>>> {
     check_allowed(op).ok()?;
-    let mut conn = match connect() {
+    let conn = match connect() {
         Ok(c) => c,
         Err(e) => {
             tracing::info!("SerialLoom Helper not used ({e}); asking through UAC instead");
             return None;
         }
     };
+    send(conn, op)
+}
+
+/// Sends `op` on a connection to the helper and reads its reply, with the
+/// same meaning of `None` as [`call`].
+fn send(mut conn: PipeStream, op: &AdminOp) -> Option<Result<Vec<VirtualPortInfo>>> {
     let request = Request {
         v: PROTOCOL,
         op: op.to_args(),
@@ -852,9 +858,18 @@ mod tests {
         let calls = with_server(
             PathBuf::from(r"C:\Program Files\SerialLoom\serialloom.exe"),
             |pipe| {
-                let r = ask(pipe, &["rename-usb", "SL0123456789=COM20"]);
-                assert!(r.refused, "another SerialLoom copy may fall back to UAC");
-                assert!(r.error.unwrap().contains("only serves the installed SerialLoom"));
+                // The helper answers a refused caller without reading its
+                // request and hangs up, so the request may or may not get
+                // through before the pipe closes. Either way the app's client
+                // must fall back to UAC. Repeat to cover both orders.
+                let op = AdminOp::parse(&s(&["rename-usb", "SL0123456789=COM20"])).unwrap();
+                for _ in 0..20 {
+                    let conn = PipeStream::connect(pipe, Duration::from_secs(5)).unwrap();
+                    assert!(
+                        send(conn, &op).is_none(),
+                        "another SerialLoom copy may fall back to UAC"
+                    );
+                }
             },
         );
         assert_eq!(calls, 0);

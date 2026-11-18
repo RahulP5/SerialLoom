@@ -37,7 +37,7 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 | **Live topology** | Drag ports onto the canvas, watch data flow, inspect bytes in the traffic monitor (ASCII or hex). |
 | **Any baud rate** | Programs pick any speed (300 to 12 Mbaud, standard or custom) and framing; the topology shows what each program chose. Virtual ports move data at full speed whatever the setting. Real ports use the speed you set for them. |
 | **Persistent** | Connections are saved and can start automatically with SerialLoom. |
-| **Automation** | Test scripts and tools can create pairs and start, stop or delete connections with `serialloom-cli` or a local API ([docs/AUTOMATION.md](docs/AUTOMATION.md)); the CLI starts SerialLoom in the background when needed. Off until you turn it on; only your own Windows account can use it. |
+| **Automation** | Test scripts and tools can create virtual pairs, connect real devices (bridge or split), and start, stop or delete connections with `serialloom-cli` or a local API ([docs/AUTOMATION.md](docs/AUTOMATION.md)); the CLI starts SerialLoom in the background when needed. Off until you turn it on; only your own Windows account can use it. |
 | **No repeated admin prompts** | The bundled SerialLoom Helper service creates, renumbers and removes SerialLoom's own ports without asking each time. |
 | **Runs in the background** | Closing the window keeps SerialLoom in the notification area, so ports stay open. It can also start there when you sign in. *Quit SerialLoom* in the icon's menu closes every port. |
 | **Light and dark themes** | Follows Windows, or choose one in *Settings*. |
@@ -57,6 +57,7 @@ SerialLoom shows a notice when a new version is out. To find out, it asks GitHub
 1. **Split a port:** drag `COM3` from the port list onto the canvas, keep the two "New virtual port" outputs, and press *Create split*. Point each app at one of the new COM ports.
 2. **Null-modem pair:** press *Virtual pair* in the toolbar. Open each of the two ports in a different program.
 3. **Serial over the network:** choose *Bridge*, pick your serial port as side A and *TCP server* `0.0.0.0:7000` as side B.
+4. **From a script or test:** turn on *Settings > Automation*, then run `serialloom-cli pair COM41 COM42` to create a pair and `serialloom-cli delete COM41` to remove it again. [docs/AUTOMATION.md](docs/AUTOMATION.md) covers every command, connecting real hardware, test benches and CI, and the API for other languages.
 
 ## Build from source
 

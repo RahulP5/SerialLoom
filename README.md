@@ -12,7 +12,7 @@ Create virtual COM ports, split one port between many apps, join ports, and brid
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-22d3ee.svg)
 ![Built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri-orange.svg)
 
-<img src="docs/images/topology.png" alt="SerialLoom topology view: a GPS on COM3 split into three virtual ports, a USB PLC bridged to TCP, and a virtual null-modem pair" />
+<img src="docs/images/topology.png" alt="SerialLoom topology view in the light theme: a GPS feed split into three virtual ports, a virtual null-modem pair, and a PLC port bridged to TCP" />
 
 </div>
 

@@ -64,39 +64,40 @@ struct Counters {
     last_error: Mutex<Option<String>>,
     /// Why data for this endpoint is being dropped. Clears once a write
     /// succeeds again.
-    write_error: Mutex<Option<String>>,
+    warning: Mutex<Option<String>>,
     line: Mutex<Option<LineStatus>>,
 }
 
 impl Counters {
     fn snapshot(&self) -> EndpointStatus {
-        let error = self.last_error.lock().clone();
         EndpointStatus {
             rx_bytes: self.rx.load(Ordering::Relaxed),
             tx_bytes: self.tx.load(Ordering::Relaxed),
             dropped_bytes: self.dropped.load(Ordering::Relaxed),
             connected: self.connected.load(Ordering::Relaxed),
             peer_open: self.peer_open.load(Ordering::Relaxed),
-            last_error: error.or_else(|| self.write_error.lock().clone()),
+            last_error: self.last_error.lock().clone(),
+            warning: self.warning.lock().clone(),
             line: self.line.lock().clone(),
         }
     }
 
-    fn set_write_error(&self, e: &io::Error) {
+    /// A write to this endpoint failed, so its data is being dropped.
+    fn set_warning(&self, e: &io::Error) {
         let message = if e.kind() == io::ErrorKind::WriteZero {
             "program not reading; data is being dropped".to_string()
         } else {
             format!("write failed: {e}")
         };
-        let mut slot = self.write_error.lock();
+        let mut slot = self.warning.lock();
         if slot.as_deref() != Some(message.as_str()) {
             tracing::warn!("{message}");
             *slot = Some(message);
         }
     }
 
-    fn clear_write_error(&self) {
-        if self.write_error.lock().take().is_some() {
+    fn clear_warning(&self) {
+        if self.warning.lock().take().is_some() {
             tracing::info!("data is being delivered again");
         }
     }
@@ -111,7 +112,7 @@ impl Counters {
 
     fn clear_error(&self) {
         *self.last_error.lock() = None;
-        *self.write_error.lock() = None;
+        *self.warning.lock() = None;
     }
 }
 
@@ -189,11 +190,11 @@ impl Shared {
                 Some(w) => match write_with_deadline(w, data, hold) {
                     Ok(()) => {
                         counters.tx.fetch_add(n, Ordering::Relaxed);
-                        counters.clear_write_error();
+                        counters.clear_warning();
                     }
                     Err(e) => {
                         counters.dropped.fetch_add(n, Ordering::Relaxed);
-                        counters.set_write_error(&e);
+                        counters.set_warning(&e);
                     }
                 },
                 None => {
@@ -719,17 +720,19 @@ mod tests {
         sh.attach(1, Writer::Channel(Arc::clone(&port) as Arc<dyn ControlChannel>));
         let status = |sh: &Shared| sh.counters[1].snapshot();
 
+        // Dropping is a warning, not an error.
         port.full.store(true, Ordering::Relaxed);
         sh.route(0, b"lost");
         assert_eq!(
-            status(&sh).last_error.as_deref(),
+            status(&sh).warning.as_deref(),
             Some("program not reading; data is being dropped")
         );
+        assert_eq!(status(&sh).last_error, None);
 
-        // Data flows again: the message goes, the dropped count stays.
+        // Data flows again: the warning goes, the dropped count stays.
         port.full.store(false, Ordering::Relaxed);
         sh.route(0, b"kept");
-        assert_eq!(status(&sh).last_error, None);
+        assert_eq!(status(&sh).warning, None);
         assert_eq!((status(&sh).tx_bytes, status(&sh).dropped_bytes), (4, 4));
 
         // The endpoint's own problem is not cleared by data flowing.

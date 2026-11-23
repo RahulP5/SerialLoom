@@ -8,6 +8,7 @@ import { formatRate } from "../../lib/format";
 function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
   const kindColor = KIND_COLOR[data.icon];
   const error = data.status?.lastError;
+  const warning = data.status?.warning;
   const connected = data.status?.connected;
   const state = !data.running ? "idle" : error && !connected ? "error" : connected ? "live" : "waiting";
   const dot = { idle: "#475569", error: "#f43f5e", live: "#34d399", waiting: "#fbbf24" }[state];
@@ -19,7 +20,7 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
         "w-[220px] rounded-xl border bg-ink-850/95 px-3 py-2.5 shadow-xl shadow-black/30 transition-colors",
         selected ? "border-loom-400" : "border-ink-700 hover:border-ink-500",
       )}
-      title={error ?? undefined}
+      title={error ?? warning ?? undefined}
     >
       <Handle id="l" type="target" position={Position.Left} style={{ background: data.color }} />
       <div className="flex items-center gap-2.5">
@@ -56,6 +57,9 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
       )}
       {error && data.running && (
         <div className="mt-1.5 truncate text-[10.5px] text-rose-300">{error}</div>
+      )}
+      {!error && warning && data.running && (
+        <div className="mt-1.5 truncate text-[10.5px] text-amber-300">{warning}</div>
       )}
       <Handle id="r" type="source" position={Position.Right} style={{ background: data.color }} />
     </div>

@@ -144,6 +144,7 @@ function HubInspector({ hub }: { hub: HubView }) {
               const st = status.endpoints[i];
               const r = hubRates[i];
               const err = status.running ? st?.lastError : null;
+              const warning = status.running ? st?.warning : null;
               return (
                 <div key={i} className="rounded-lg border border-ink-700 bg-ink-850 px-3 py-2">
                   <div className="flex items-center gap-2">
@@ -186,6 +187,7 @@ function HubInspector({ hub }: { hub: HubView }) {
                     </div>
                   )}
                   {err && <p className="mt-1.5 text-[11px] break-words text-rose-300">{err}</p>}
+                  {warning && <p className="mt-1.5 text-[11px] break-words text-amber-300">{warning}</p>}
                 </div>
               );
             })}

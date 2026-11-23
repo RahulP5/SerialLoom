@@ -45,6 +45,8 @@ export interface EndpointStatus {
   /** Virtual ports: a program has the COM side open. */
   peerOpen: boolean;
   lastError: string | null;
+  /** Data for this endpoint is being dropped right now (e.g. its program is not reading). Clears once data flows again. */
+  warning?: string | null;
   /** Virtual ports: the line settings the program chose (null while no program has the port open). */
   line?: LineStatus | null;
 }

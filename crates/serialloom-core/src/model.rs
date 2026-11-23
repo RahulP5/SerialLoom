@@ -247,6 +247,11 @@ pub struct EndpointStatus {
     #[serde(default)]
     pub peer_open: bool,
     pub last_error: Option<String>,
+    /// Why data for this endpoint is being dropped right now, for example
+    /// because the program on a virtual port is not reading. Clears once
+    /// data flows again; `dropped_bytes` keeps the count.
+    #[serde(default)]
+    pub warning: Option<String>,
     /// For virtual ports: the line settings the program on the COM side chose.
     #[serde(default)]
     pub line: Option<LineStatus>,

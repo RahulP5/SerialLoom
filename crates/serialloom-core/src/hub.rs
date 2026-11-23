@@ -4,7 +4,9 @@
 //! connection: it opens (and re-opens) the port or socket, publishes a writer
 //! handle, reads incoming bytes and pushes them straight to the writers of
 //! the target endpoints. With no central router thread, latency stays low,
-//! and a slow target applies back-pressure to its source only.
+//! and a slow target applies back-pressure to its source only. A real serial
+//! port cannot be held back, so its data is never held up by a slow target:
+//! a target that cannot take it right now loses it (counted as dropped).
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -30,7 +32,26 @@ const MONITOR_MAX_BYTES: usize = 256 * 1024;
 const MONITOR_MAX_RECORDS: usize = 4000;
 const MONITOR_PAGE: usize = 500;
 
-type Writer = Box<dyn Write + Send>;
+/// Where an endpoint's incoming data is written.
+enum Writer {
+    /// A serial port or TCP connection.
+    Stream(Box<dyn Write + Send>),
+    /// A SerialLoom virtual port.
+    Channel(Arc<dyn ControlChannel>),
+}
+
+impl Writer {
+    /// `hold`: the data's source can be held back, so the write may wait
+    /// for a slow program. Without it, what does not fit right now is not
+    /// accepted, and other targets are not held up.
+    fn write(&mut self, data: &[u8], hold: bool) -> io::Result<usize> {
+        match self {
+            Writer::Stream(w) => w.write(data),
+            Writer::Channel(c) if hold => c.write(data),
+            Writer::Channel(c) => c.write_now(data),
+        }
+    }
+}
 
 #[derive(Default)]
 struct Counters {
@@ -108,6 +129,10 @@ impl Monitor {
 struct Shared {
     kind: HubKind,
     stop: AtomicBool,
+    /// Per endpoint: its sender can be held back while a target is slow.
+    /// Not a real serial port: its device keeps sending (SerialLoom opens
+    /// it with RTS on, so even RTS/CTS flow control does not pause it).
+    holdable: Vec<bool>,
     writers: Vec<Mutex<Option<Writer>>>,
     counters: Vec<Counters>,
     monitor: Mutex<Monitor>,
@@ -131,11 +156,12 @@ impl Shared {
         self.counters[src].rx.fetch_add(n, Ordering::Relaxed);
         self.monitor.lock().push(src, data);
 
+        let hold = self.holdable[src];
         for target in route_targets(self.kind, self.writers.len(), src) {
             let counters = &self.counters[target];
             let mut slot = self.writers[target].lock();
             match slot.as_mut() {
-                Some(w) => match write_with_deadline(w.as_mut(), data) {
+                Some(w) => match write_with_deadline(w, data, hold) {
                     Ok(()) => {
                         counters.tx.fetch_add(n, Ordering::Relaxed);
                     }
@@ -170,10 +196,10 @@ fn is_transient(e: &io::Error) -> bool {
     )
 }
 
-fn write_with_deadline(w: &mut dyn Write, mut data: &[u8]) -> io::Result<()> {
+fn write_with_deadline(w: &mut Writer, mut data: &[u8], hold: bool) -> io::Result<()> {
     let deadline = Instant::now() + WRITE_DEADLINE;
     while !data.is_empty() {
-        match w.write(data) {
+        match w.write(data, hold) {
             Ok(0) => {
                 return Err(io::Error::new(
                     io::ErrorKind::WriteZero,
@@ -205,6 +231,10 @@ impl HubRuntime {
         let shared = Arc::new(Shared {
             kind: spec.kind,
             stop: AtomicBool::new(false),
+            holdable: endpoints
+                .iter()
+                .map(|e| !matches!(e, EndpointSpec::Serial { .. }))
+                .collect(),
             writers: (0..count).map(|_| Mutex::new(None)).collect(),
             counters: (0..count).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
@@ -301,7 +331,7 @@ fn serial_loop(idx: usize, port: &str, settings: &SerialSettings, sh: &Shared) {
             }
         };
         match reader.try_clone() {
-            Ok(writer) => sh.attach(idx, Box::new(writer)),
+            Ok(writer) => sh.attach(idx, Writer::Stream(Box::new(writer))),
             Err(e) => {
                 counters.set_error(format!("cannot share {port}: {e}"));
                 sh.sleep(RETRY_DELAY);
@@ -333,19 +363,6 @@ fn serial_loop(idx: usize, port: &str, settings: &SerialSettings, sh: &Shared) {
 // SerialLoom virtual ports
 // ---------------------------------------------------------------------------
 
-/// Writes into a virtual port's control side.
-struct ChannelWriter(Arc<dyn ControlChannel>);
-
-impl Write for ChannelWriter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.write(buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 const STATE_POLL: Duration = Duration::from_millis(500);
 
 fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
@@ -360,7 +377,7 @@ fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
                 continue;
             }
         };
-        sh.attach(idx, Box::new(ChannelWriter(Arc::clone(&channel))));
+        sh.attach(idx, Writer::Channel(Arc::clone(&channel)));
         tracing::info!("attached to virtual port {port}");
 
         let mut polled = Instant::now() - STATE_POLL;
@@ -409,7 +426,7 @@ fn attach_stream(idx: usize, stream: &TcpStream, sh: &Shared) -> io::Result<()> 
     stream.set_read_timeout(Some(READ_TIMEOUT))?;
     stream.set_write_timeout(Some(WRITE_DEADLINE))?;
     stream.set_nodelay(true)?;
-    sh.attach(idx, Box::new(stream.try_clone()?));
+    sh.attach(idx, Writer::Stream(Box::new(stream.try_clone()?)));
     Ok(())
 }
 
@@ -592,6 +609,74 @@ mod tests {
         assert_eq!(status[0].tx_bytes, 3);
         assert_eq!(status[1].tx_bytes, 5);
         assert!(!hub.monitor_since(0).is_empty());
+    }
+
+    /// Records how a virtual port was written to.
+    #[derive(Default)]
+    struct Recorder {
+        waiting: AtomicU64,
+        now: AtomicU64,
+        /// Accepts nothing, like a port whose program stopped reading.
+        full: AtomicBool,
+    }
+
+    impl ControlChannel for Recorder {
+        fn read(&self, _buf: &mut [u8], _timeout: Duration) -> io::Result<usize> {
+            Ok(0)
+        }
+
+        fn write(&self, data: &[u8]) -> io::Result<usize> {
+            self.waiting.fetch_add(1, Ordering::Relaxed);
+            Ok(data.len())
+        }
+
+        fn write_now(&self, data: &[u8]) -> io::Result<usize> {
+            self.now.fetch_add(1, Ordering::Relaxed);
+            Ok(if self.full.load(Ordering::Relaxed) {
+                0
+            } else {
+                data.len()
+            })
+        }
+
+        fn state(&self) -> Option<crate::driver::ControlState> {
+            None
+        }
+    }
+
+    fn calls(r: &Recorder) -> (u64, u64) {
+        (r.now.load(Ordering::Relaxed), r.waiting.load(Ordering::Relaxed))
+    }
+
+    /// Data from a real serial port must not wait for a virtual port: the
+    /// device cannot be held back, and other members would be held up.
+    #[test]
+    fn serial_data_does_not_wait_for_virtual_ports() {
+        let ports: Vec<Arc<Recorder>> = (0..3).map(|_| Arc::new(Recorder::default())).collect();
+        let sh = Shared {
+            kind: HubKind::Split,
+            stop: AtomicBool::new(false),
+            holdable: vec![false, true, true], // the master is a real serial port
+            writers: (0..3).map(|_| Mutex::new(None)).collect(),
+            counters: (0..3).map(|_| Counters::default()).collect(),
+            monitor: Mutex::new(Monitor::default()),
+        };
+        for (i, p) in ports.iter().enumerate() {
+            sh.attach(i, Writer::Channel(Arc::clone(p) as Arc<dyn ControlChannel>));
+        }
+
+        // Member 1 is full: it loses the data, member 2 still gets it.
+        ports[1].full.store(true, Ordering::Relaxed);
+        sh.route(0, b"device");
+        assert_eq!(calls(&ports[1]), (1, 0));
+        assert_eq!(calls(&ports[2]), (1, 0));
+        let status: Vec<EndpointStatus> = sh.counters.iter().map(Counters::snapshot).collect();
+        assert_eq!((status[1].tx_bytes, status[1].dropped_bytes), (0, 6));
+        assert_eq!((status[2].tx_bytes, status[2].dropped_bytes), (6, 0));
+
+        // A program's data can be held back, so it may wait as before.
+        sh.route(2, b"program");
+        assert_eq!(calls(&ports[0]), (0, 1));
     }
 
     #[test]

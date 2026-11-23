@@ -25,8 +25,16 @@ pub trait ControlChannel: Send + Sync {
     /// Waits up to `timeout` for data. Returns `Ok(0)` when nothing arrived.
     fn read(&self, buf: &mut [u8], timeout: Duration) -> io::Result<usize>;
 
-    /// Returns how many bytes the driver accepted.
+    /// Returns how many bytes the driver accepted. May wait for room while
+    /// the program on the COM side is still reading.
     fn write(&self, data: &[u8]) -> io::Result<usize>;
+
+    /// Like [`write`](Self::write), but never waits: for data whose sender
+    /// cannot be held back, such as a real serial port. What does not fit
+    /// right now is not accepted.
+    fn write_now(&self, data: &[u8]) -> io::Result<usize> {
+        self.write(data)
+    }
 
     /// What the program on the COM side has configured, when available.
     fn state(&self) -> Option<ControlState>;

@@ -363,29 +363,11 @@ impl ControlChannel for DeviceChannel {
     }
 
     fn write(&self, data: &[u8]) -> io::Result<usize> {
-        let mut st = self.0.state.lock();
-        loop {
-            if st.conn.is_none() || !st.port_open {
-                // No program has the port open: accept and drop, like a cable
-                // with nothing on the other end.
-                return Ok(data.len());
-            }
-            let room = BUFFER_LIMIT.saturating_sub(st.to_host.len());
-            if room > 0 {
-                let n = room.min(data.len());
-                st.to_host.extend(&data[..n]);
-                flush_in(&mut st);
-                return Ok(n);
-            }
-            // Full: wait while the program still reads now and then. Once it
-            // has not read for READ_STALL, accept nothing (the hub counts it
-            // as dropped) without waiting again until it reads.
-            let idle = st.last_read.map_or(READ_STALL, |t| t.elapsed());
-            if idle >= READ_STALL {
-                return Ok(0);
-            }
-            self.0.room.wait_for(&mut st, READ_STALL - idle);
-        }
+        self.put(data, true)
+    }
+
+    fn write_now(&self, data: &[u8]) -> io::Result<usize> {
+        self.put(data, false)
     }
 
     fn state(&self) -> Option<ControlState> {
@@ -404,6 +386,36 @@ impl ControlChannel for DeviceChannel {
             from_com_total: 0,
             to_com_total: 0,
         })
+    }
+}
+
+impl DeviceChannel {
+    /// Queues data for the program. With `wait`, a full buffer waits while
+    /// the program still reads now and then.
+    fn put(&self, data: &[u8], wait: bool) -> io::Result<usize> {
+        let mut st = self.0.state.lock();
+        loop {
+            if st.conn.is_none() || !st.port_open {
+                // No program has the port open: accept and drop, like a cable
+                // with nothing on the other end.
+                return Ok(data.len());
+            }
+            let room = BUFFER_LIMIT.saturating_sub(st.to_host.len());
+            if room > 0 {
+                let n = room.min(data.len());
+                st.to_host.extend(&data[..n]);
+                flush_in(&mut st);
+                return Ok(n);
+            }
+            // Full: wait while the program still reads now and then. Once it
+            // has not read for READ_STALL, accept nothing (the hub counts it
+            // as dropped) without waiting again until it reads.
+            let idle = st.last_read.map_or(READ_STALL, |t| t.elapsed());
+            if !wait || idle >= READ_STALL {
+                return Ok(0);
+            }
+            self.0.room.wait_for(&mut st, READ_STALL - idle);
+        }
     }
 }
 
@@ -911,6 +923,24 @@ mod tests {
         host.submit(4, p::DIR_IN, cdc::EP_DATA_IN, 4096, [0; 8], &[]);
         assert_eq!(host.ret(), (4, 0, vec![7u8; 4096]));
         assert_eq!(channel.write(b"kept").unwrap(), 4);
+    }
+
+    #[test]
+    fn write_now_never_waits() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST13");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+        open_and_read_once(&mut host, &channel);
+        assert_eq!(
+            channel.write_now(&vec![7u8; BUFFER_LIMIT + 10]).unwrap(),
+            BUFFER_LIMIT
+        );
+
+        // Full while the program still reads: `write` would wait, `write_now` does not.
+        let t = Instant::now();
+        assert_eq!(channel.write_now(b"x").unwrap(), 0);
+        assert!(t.elapsed() < Duration::from_millis(50));
     }
 
     #[test]

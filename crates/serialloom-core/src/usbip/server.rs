@@ -4,7 +4,9 @@
 //! "imports" a device by bus ID. From then on the TCP connection carries USB
 //! requests (URBs). Bulk OUT data from the host is what the program wrote to
 //! the COM port; bulk IN requests stay pending until SerialLoom has data for
-//! the program.
+//! the program. Neither side loses data to a full buffer while the other
+//! keeps up: SerialLoom holds back the program's write until it has caught
+//! up, and waits for a program that is still reading.
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
@@ -12,7 +14,7 @@ use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 
@@ -20,9 +22,16 @@ use super::cdc::{self, CdcState, ControlReply};
 use super::protocol::{self as p, Command, DeviceInfo, OpRequest, Submit};
 use crate::driver::{ControlChannel, ControlState};
 
-/// Bytes buffered in each direction before data is dropped.
+/// Bytes buffered in each direction. Past it, the program's writes wait
+/// for SerialLoom, and SerialLoom's writes wait for the program.
 const BUFFER_LIMIT: usize = 256 * 1024;
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long SerialLoom's writes wait for a program that has stopped
+/// reading. After that, data for it is dropped until it reads again.
+#[cfg(not(test))]
+const READ_STALL: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const READ_STALL: Duration = Duration::from_millis(300);
 
 struct Pending {
     seqnum: u32,
@@ -37,6 +46,12 @@ struct DevState {
     from_host: VecDeque<u8>,
     pending_in: VecDeque<Pending>,
     pending_notify: VecDeque<Pending>,
+    /// Bulk OUT requests held back while `from_host` is over the limit.
+    /// Their data is already in `from_host`, in the same order. Holding the
+    /// completion makes the program's write wait, as a busy device would.
+    pending_out: VecDeque<Pending>,
+    /// When usbser.sys last asked for data (the program is reading).
+    last_read: Option<Instant>,
     /// Last SERIAL_STATE sent; `None` before the first one.
     notified: Option<u16>,
     /// Writer half of the client connection while imported.
@@ -65,6 +80,8 @@ pub struct VirtualDevice {
     pub info: DeviceInfo,
     state: Mutex<DevState>,
     data_ready: Condvar,
+    /// Signalled when data for the program leaves `to_host`, or the port closes.
+    room: Condvar,
 }
 
 impl VirtualDevice {
@@ -77,6 +94,8 @@ impl VirtualDevice {
                 from_host: VecDeque::new(),
                 pending_in: VecDeque::new(),
                 pending_notify: VecDeque::new(),
+                pending_out: VecDeque::new(),
+                last_read: None,
                 notified: None,
                 conn: None,
                 control_open: false,
@@ -86,6 +105,7 @@ impl VirtualDevice {
                 last_notify: None,
             }),
             data_ready: Condvar::new(),
+            room: Condvar::new(),
         }
     }
 
@@ -131,6 +151,7 @@ impl VirtualDevice {
         st.notified = None;
         st.to_host.clear();
         st.from_host.clear();
+        st.pending_out.clear();
     }
 
     fn detach(&self) {
@@ -138,6 +159,9 @@ impl VirtualDevice {
         st.conn = None;
         st.pending_in.clear();
         st.pending_notify.clear();
+        st.pending_out.clear();
+        st.last_read = None;
+        self.room.notify_all();
         st.port_open = false;
         st.notify_active = false;
         st.last_in = None;
@@ -164,21 +188,33 @@ impl VirtualDevice {
             }
             cdc::EP_DATA_OUT if s.direction == p::DIR_OUT => {
                 let n = s.data.len();
-                if st.control_open {
-                    st.from_host.extend(&s.data);
-                    let excess = st.from_host.len().saturating_sub(BUFFER_LIMIT);
-                    st.from_host.drain(..excess);
-                    self.data_ready.notify_all();
+                if !st.control_open {
+                    // Nothing on SerialLoom's side: like a cable with nothing
+                    // on the other end.
+                    send(&mut st, &p::encode_ret_submit(s.seqnum, 0, &[], n));
+                    return;
                 }
-                send(&mut st, &p::encode_ret_submit(s.seqnum, 0, &[], n));
+                st.from_host.extend(&s.data);
+                self.data_ready.notify_all();
+                if st.pending_out.is_empty() && st.from_host.len() <= BUFFER_LIMIT {
+                    send(&mut st, &p::encode_ret_submit(s.seqnum, 0, &[], n));
+                } else {
+                    // SerialLoom is behind: the write completes once it catches up.
+                    st.pending_out.push_back(Pending {
+                        seqnum: s.seqnum,
+                        length: n as u32,
+                    });
+                }
             }
             cdc::EP_DATA_IN if s.direction == p::DIR_IN => {
                 self.mark_open(&mut st);
+                st.last_read = Some(Instant::now());
                 st.pending_in.push_back(Pending {
                     seqnum: s.seqnum,
                     length: s.length,
                 });
                 flush_in(&mut st);
+                self.room.notify_all();
             }
             cdc::EP_NOTIFY if s.direction == p::DIR_IN => {
                 self.mark_open(&mut st);
@@ -218,10 +254,22 @@ impl VirtualDevice {
         let cancels_read = crossed_read || st.pending_in.iter().any(|q| q.seqnum == victim);
         let cancels_notify =
             st.last_notify == Some(victim) || st.pending_notify.iter().any(|q| q.seqnum == victim);
+        let held_write = st.pending_out.iter().position(|q| q.seqnum == victim);
+        if let Some(i) = held_write {
+            // The program cancelled a write that was held back (a write
+            // timeout, or closing the port): take back what SerialLoom has
+            // not passed on yet. Held writes fill the end of `from_host`.
+            let later: usize = st.pending_out.iter().skip(i + 1).map(|q| q.length as usize).sum();
+            let end = st.from_host.len().saturating_sub(later);
+            let start = end.saturating_sub(st.pending_out[i].length as usize);
+            st.from_host.drain(start..end);
+            st.pending_out.remove(i);
+            release_out(&mut st);
+        }
         let before = st.pending_in.len() + st.pending_notify.len();
         st.pending_in.retain(|q| q.seqnum != victim);
         st.pending_notify.retain(|q| q.seqnum != victim);
-        let removed = before != st.pending_in.len() + st.pending_notify.len();
+        let removed = held_write.is_some() || before != st.pending_in.len() + st.pending_notify.len();
         if cancels_notify && st.pending_notify.is_empty() {
             st.notify_active = false;
         }
@@ -234,6 +282,7 @@ impl VirtualDevice {
                 // The program closed the port. Its successor must not get old data.
                 st.port_open = false;
                 st.to_host.clear();
+                self.room.notify_all();
                 tracing::info!("virtual device {}: the program closed the port", self.info.busid);
             }
         }
@@ -249,6 +298,17 @@ fn send(st: &mut DevState, bytes: &[u8]) {
     };
     if failed && let Some(conn) = st.conn.take() {
         let _ = conn.shutdown(Shutdown::Both);
+    }
+}
+
+/// Completes held-back writes once SerialLoom has caught up.
+fn release_out(st: &mut DevState) {
+    if st.from_host.len() > BUFFER_LIMIT {
+        return;
+    }
+    while let Some(q) = st.pending_out.pop_front() {
+        let msg = p::encode_ret_submit(q.seqnum, 0, &[], q.length as usize);
+        send(st, &msg);
     }
 }
 
@@ -298,21 +358,34 @@ impl ControlChannel for DeviceChannel {
         for (slot, b) in buf.iter_mut().zip(st.from_host.drain(..n)) {
             *slot = b;
         }
+        release_out(&mut st);
         Ok(n)
     }
 
     fn write(&self, data: &[u8]) -> io::Result<usize> {
         let mut st = self.0.state.lock();
-        if st.conn.is_none() || !st.port_open {
-            // No program has the port open: accept and drop, like a cable
-            // with nothing on the other end.
-            return Ok(data.len());
+        loop {
+            if st.conn.is_none() || !st.port_open {
+                // No program has the port open: accept and drop, like a cable
+                // with nothing on the other end.
+                return Ok(data.len());
+            }
+            let room = BUFFER_LIMIT.saturating_sub(st.to_host.len());
+            if room > 0 {
+                let n = room.min(data.len());
+                st.to_host.extend(&data[..n]);
+                flush_in(&mut st);
+                return Ok(n);
+            }
+            // Full: wait while the program still reads now and then. Once it
+            // has not read for READ_STALL, accept nothing (the hub counts it
+            // as dropped) without waiting again until it reads.
+            let idle = st.last_read.map_or(READ_STALL, |t| t.elapsed());
+            if idle >= READ_STALL {
+                return Ok(0);
+            }
+            self.0.room.wait_for(&mut st, READ_STALL - idle);
         }
-        let room = BUFFER_LIMIT.saturating_sub(st.to_host.len());
-        let n = room.min(data.len());
-        st.to_host.extend(&data[..n]);
-        flush_in(&mut st);
-        Ok(n)
     }
 
     fn state(&self) -> Option<ControlState> {
@@ -339,6 +412,7 @@ impl Drop for DeviceChannel {
         let mut st = self.0.state.lock();
         st.control_open = false;
         st.from_host.clear();
+        release_out(&mut st);
         flush_notify(&mut st);
     }
 }
@@ -728,6 +802,140 @@ mod tests {
         host.unlink(5, 3);
         assert_eq!(ret_out(&mut host), (5, 0));
         assert!(!dev.is_port_open());
+    }
+
+    /// Reads from the control side until `len` bytes arrived.
+    fn read_all(channel: &DeviceChannel, len: usize) -> Vec<u8> {
+        let mut got = Vec::new();
+        let mut buf = [0u8; 4096];
+        while got.len() < len {
+            let n = channel.read(&mut buf, Duration::from_secs(2)).unwrap();
+            assert!(n > 0, "data went missing after {} bytes", got.len());
+            got.extend_from_slice(&buf[..n]);
+        }
+        got
+    }
+
+    /// Opens the port the way usbser.sys does (a read and the notification
+    /// pipe), and lets SerialLoom's first write complete that read.
+    fn open_and_read_once(host: &mut Client, channel: &DeviceChannel) {
+        host.submit(1, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(2, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        host.sync(3);
+        assert_eq!(channel.write(b"hello").unwrap(), 5);
+        assert_eq!(host.ret(), (1, 0, b"hello".to_vec()));
+    }
+
+    #[test]
+    fn large_writes_are_held_back_not_dropped() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST8");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+
+        // A write bigger than the buffer, then a small one behind it.
+        let big: Vec<u8> = (0..BUFFER_LIMIT * 2 + 1000).map(|i| (i % 251) as u8).collect();
+        host.submit(1, p::DIR_OUT, cdc::EP_DATA_OUT, big.len() as u32, [0; 8], &big);
+        host.submit(2, p::DIR_OUT, cdc::EP_DATA_OUT, 3, [0; 8], b"end");
+        // Neither completes before SerialLoom catches up: the sync reply comes first.
+        host.sync(3);
+
+        let mut want = big.clone();
+        want.extend_from_slice(b"end");
+        assert_eq!(read_all(&channel, want.len()), want);
+        assert_eq!(ret_out(&mut host), (1, 0));
+        assert_eq!(ret_out(&mut host), (2, 0));
+    }
+
+    #[test]
+    fn cancelled_held_write_is_taken_back() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST9");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+
+        let big = vec![1u8; BUFFER_LIMIT + 1000];
+        host.submit(1, p::DIR_OUT, cdc::EP_DATA_OUT, big.len() as u32, [0; 8], &big);
+        host.submit(2, p::DIR_OUT, cdc::EP_DATA_OUT, 3, [0; 8], b"xyz");
+        // The program gives up on its second write (e.g. a write timeout).
+        host.unlink(3, 2);
+        assert_eq!(ret_out(&mut host), (3, p::ECONNRESET));
+
+        assert_eq!(read_all(&channel, big.len()), big);
+        assert_eq!(ret_out(&mut host), (1, 0));
+        let mut buf = [0u8; 8];
+        assert_eq!(channel.read(&mut buf, Duration::from_millis(100)).unwrap(), 0);
+    }
+
+    #[test]
+    fn writes_wait_for_a_program_that_reads() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST10");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = Arc::new(dev.open_control().unwrap());
+        open_and_read_once(&mut host, &channel);
+        assert_eq!(channel.write(&vec![7u8; BUFFER_LIMIT]).unwrap(), BUFFER_LIMIT);
+
+        // Full: the next write waits until the program reads.
+        let writer = {
+            let channel = Arc::clone(&channel);
+            std::thread::spawn(move || {
+                let t = Instant::now();
+                (channel.write(b"more").unwrap(), t.elapsed())
+            })
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        host.submit(4, p::DIR_IN, cdc::EP_DATA_IN, 4096, [0; 8], &[]);
+        assert_eq!(host.ret(), (4, 0, vec![7u8; 4096]));
+        let (n, waited) = writer.join().unwrap();
+        assert_eq!(n, 4);
+        assert!(waited < READ_STALL, "waited {waited:?}");
+    }
+
+    #[test]
+    fn writes_for_a_program_that_stopped_reading_drop_quickly() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST11");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+        open_and_read_once(&mut host, &channel);
+        assert_eq!(channel.write(&vec![7u8; BUFFER_LIMIT]).unwrap(), BUFFER_LIMIT);
+
+        std::thread::sleep(READ_STALL + Duration::from_millis(50));
+        let t = Instant::now();
+        assert_eq!(channel.write(b"lost").unwrap(), 0);
+        assert_eq!(channel.write(b"lost").unwrap(), 0);
+        assert!(t.elapsed() < Duration::from_millis(50));
+
+        // Reading again ends the stall.
+        host.submit(4, p::DIR_IN, cdc::EP_DATA_IN, 4096, [0; 8], &[]);
+        assert_eq!(host.ret(), (4, 0, vec![7u8; 4096]));
+        assert_eq!(channel.write(b"kept").unwrap(), 4);
+    }
+
+    #[test]
+    fn closing_the_port_ends_a_waiting_write() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST12");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = Arc::new(dev.open_control().unwrap());
+        open_and_read_once(&mut host, &channel);
+        assert_eq!(channel.write(&vec![7u8; BUFFER_LIMIT]).unwrap(), BUFFER_LIMIT);
+
+        let writer = {
+            let channel = Arc::clone(&channel);
+            std::thread::spawn(move || {
+                let t = Instant::now();
+                (channel.write(b"x").unwrap(), t.elapsed())
+            })
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        host.unlink(4, 2); // closing cancels the notification pipe
+        assert_eq!(ret_out(&mut host), (4, p::ECONNRESET));
+        let (n, waited) = writer.join().unwrap();
+        assert!(!dev.is_port_open());
+        assert_eq!(n, 1, "no program: accepted and dropped");
+        assert!(waited < READ_STALL, "waited {waited:?}");
     }
 
     #[test]

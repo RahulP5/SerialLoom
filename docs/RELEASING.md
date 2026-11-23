@@ -36,13 +36,13 @@ Then: **Settings > General > Danger zone > Change visibility > Public**.
 
 ## 4. Releases
 
-Push a version tag; the *Release* workflow builds the installer and opens a **draft** release:
+Push a version tag; the *Release* workflow builds the installer and **publishes the release right away** with the installer attached (`releaseDraft: false` in `.github/workflows/release.yml`). There is no draft to review first, so push the tag only after CI has passed on `main`:
 
 ```powershell
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The release is published automatically with the installer attached. Edit its notes on GitHub if needed.
+The release notes come from `releaseBody` in the workflow: update *What's new* there in the release commit. They can still be edited on GitHub afterwards.
 
 The installer is not code-signed yet, so Windows SmartScreen asks users to confirm. Free signing for open-source projects is available from [SignPath Foundation](https://signpath.org) once the repository is public.

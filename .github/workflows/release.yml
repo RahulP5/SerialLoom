@@ -42,11 +42,11 @@ jobs:
           releaseBody: |
             **Virtual COM port manager for Windows** - create, pair, split, join and bridge serial ports with a live visual editor.
 
-            ### What's new in 0.2.0
-            - **Automation:** test scripts and tools can create a virtual null-modem pair, use it and delete it again with the new `serialloom-cli` (installed next to SerialLoom) or a local JSON API. Thanks to @ying-zi-pro for the suggestion (#13). Turn it on in *Settings > Automation*; only your own Windows account can use it. See [docs/AUTOMATION.md](https://github.com/RahulP5/SerialLoom/blob/main/docs/AUTOMATION.md).
-            - **No more repeated administrator prompts:** the new SerialLoom Helper service creates, renumbers and removes SerialLoom's own ports without asking each time. It runs only when needed and can be removed in *Settings > Administrator permission*.
-            - SerialLoom can start in the background when you sign in (*Settings > Running in the background*), and `serialloom-cli` starts it on demand.
-            - A notice in the corner tells you when a new version is out (can be turned off in *Settings > Updates*).
+            ### What's new in 0.3.0
+            - **Fixed: data lost when a program reads late.** Data sent to a virtual port while the program there was slow to read was dropped, and the port briefly showed as closed. Thanks to @ying-zi-pro for the detailed report (#14).
+            - **Fixed: large writes cut short.** A program that wrote more than 256 KiB at once to a virtual port lost all but the last 256 KiB, and fast writes could lose data the same way. Writes now wait while the other side catches up, as with a busy USB adapter.
+            - **A program that stops reading no longer holds anyone up for long:** data for it waits up to 2 seconds, then is dropped and counted. Data from a real serial port never waits: in a split, the other ports still get everything.
+            - A port that is dropping data shows an amber *program not reading* note, which clears once data flows again (also as `warning` in the automation API).
 
             ### Highlights
             - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)

@@ -60,20 +60,44 @@ struct Counters {
     dropped: AtomicU64,
     connected: AtomicBool,
     peer_open: AtomicBool,
+    /// The endpoint's own problem (cannot open, connection lost, ...).
     last_error: Mutex<Option<String>>,
+    /// Why data for this endpoint is being dropped. Clears once a write
+    /// succeeds again.
+    write_error: Mutex<Option<String>>,
     line: Mutex<Option<LineStatus>>,
 }
 
 impl Counters {
     fn snapshot(&self) -> EndpointStatus {
+        let error = self.last_error.lock().clone();
         EndpointStatus {
             rx_bytes: self.rx.load(Ordering::Relaxed),
             tx_bytes: self.tx.load(Ordering::Relaxed),
             dropped_bytes: self.dropped.load(Ordering::Relaxed),
             connected: self.connected.load(Ordering::Relaxed),
             peer_open: self.peer_open.load(Ordering::Relaxed),
-            last_error: self.last_error.lock().clone(),
+            last_error: error.or_else(|| self.write_error.lock().clone()),
             line: self.line.lock().clone(),
+        }
+    }
+
+    fn set_write_error(&self, e: &io::Error) {
+        let message = if e.kind() == io::ErrorKind::WriteZero {
+            "program not reading; data is being dropped".to_string()
+        } else {
+            format!("write failed: {e}")
+        };
+        let mut slot = self.write_error.lock();
+        if slot.as_deref() != Some(message.as_str()) {
+            tracing::warn!("{message}");
+            *slot = Some(message);
+        }
+    }
+
+    fn clear_write_error(&self) {
+        if self.write_error.lock().take().is_some() {
+            tracing::info!("data is being delivered again");
         }
     }
 
@@ -87,6 +111,7 @@ impl Counters {
 
     fn clear_error(&self) {
         *self.last_error.lock() = None;
+        *self.write_error.lock() = None;
     }
 }
 
@@ -164,10 +189,11 @@ impl Shared {
                 Some(w) => match write_with_deadline(w, data, hold) {
                     Ok(()) => {
                         counters.tx.fetch_add(n, Ordering::Relaxed);
+                        counters.clear_write_error();
                     }
                     Err(e) => {
                         counters.dropped.fetch_add(n, Ordering::Relaxed);
-                        counters.set_error(format!("write failed: {e}"));
+                        counters.set_write_error(&e);
                     }
                 },
                 None => {
@@ -648,19 +674,26 @@ mod tests {
         (r.now.load(Ordering::Relaxed), r.waiting.load(Ordering::Relaxed))
     }
 
+    /// A hub without endpoint threads; `holdable[i]` false means endpoint
+    /// `i` is a real serial port.
+    fn shared(kind: HubKind, holdable: Vec<bool>) -> Shared {
+        let n = holdable.len();
+        Shared {
+            kind,
+            stop: AtomicBool::new(false),
+            holdable,
+            writers: (0..n).map(|_| Mutex::new(None)).collect(),
+            counters: (0..n).map(|_| Counters::default()).collect(),
+            monitor: Mutex::new(Monitor::default()),
+        }
+    }
+
     /// Data from a real serial port must not wait for a virtual port: the
     /// device cannot be held back, and other members would be held up.
     #[test]
     fn serial_data_does_not_wait_for_virtual_ports() {
         let ports: Vec<Arc<Recorder>> = (0..3).map(|_| Arc::new(Recorder::default())).collect();
-        let sh = Shared {
-            kind: HubKind::Split,
-            stop: AtomicBool::new(false),
-            holdable: vec![false, true, true], // the master is a real serial port
-            writers: (0..3).map(|_| Mutex::new(None)).collect(),
-            counters: (0..3).map(|_| Counters::default()).collect(),
-            monitor: Mutex::new(Monitor::default()),
-        };
+        let sh = shared(HubKind::Split, vec![false, true, true]);
         for (i, p) in ports.iter().enumerate() {
             sh.attach(i, Writer::Channel(Arc::clone(p) as Arc<dyn ControlChannel>));
         }
@@ -677,6 +710,32 @@ mod tests {
         // A program's data can be held back, so it may wait as before.
         sh.route(2, b"program");
         assert_eq!(calls(&ports[0]), (0, 1));
+    }
+
+    #[test]
+    fn overflow_message_clears_once_data_flows_again() {
+        let port = Arc::new(Recorder::default());
+        let sh = shared(HubKind::Bridge, vec![false, true]);
+        sh.attach(1, Writer::Channel(Arc::clone(&port) as Arc<dyn ControlChannel>));
+        let status = |sh: &Shared| sh.counters[1].snapshot();
+
+        port.full.store(true, Ordering::Relaxed);
+        sh.route(0, b"lost");
+        assert_eq!(
+            status(&sh).last_error.as_deref(),
+            Some("program not reading; data is being dropped")
+        );
+
+        // Data flows again: the message goes, the dropped count stays.
+        port.full.store(false, Ordering::Relaxed);
+        sh.route(0, b"kept");
+        assert_eq!(status(&sh).last_error, None);
+        assert_eq!((status(&sh).tx_bytes, status(&sh).dropped_bytes), (4, 4));
+
+        // The endpoint's own problem is not cleared by data flowing.
+        sh.counters[1].set_error("connection lost: reset".into());
+        sh.route(0, b"more");
+        assert_eq!(status(&sh).last_error.as_deref(), Some("connection lost: reset"));
     }
 
     #[test]

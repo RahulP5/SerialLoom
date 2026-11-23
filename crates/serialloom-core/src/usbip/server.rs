@@ -43,12 +43,21 @@ struct DevState {
     conn: Option<TcpStream>,
     /// SerialLoom has the control side open.
     control_open: bool,
-    /// A program has the COM port open. usbser.sys keeps a bulk IN request
-    /// pending while the port is open and cancels it on close. DTR cannot
-    /// tell: programs may read with DTR low, and it stays high after close.
-    reading: bool,
-    /// The last bulk IN request completed. A cancel can cross its completion.
-    last_in: Option<u32>,
+    /// A program has the COM port open. usbser.sys starts reading (bulk IN)
+    /// and the notification pipe (interrupt IN) when a program opens the
+    /// port, and cancels both when it closes the port. A read cancelled
+    /// while the notification pipe runs is a pause: usbser.sys also stops
+    /// reading while its receive buffer is full and reads again once the
+    /// program does. DTR cannot tell: programs may read with DTR low.
+    port_open: bool,
+    /// usbser.sys has the notification pipe running (submitted, not cancelled).
+    notify_active: bool,
+    /// The last bulk IN request completed, with its data. A cancel can cross
+    /// its completion; usbip-win2 then drops the data, so it is sent again.
+    /// usbser.sys keeps one read outstanding, so the last one is enough.
+    last_in: Option<(u32, Vec<u8>)>,
+    /// The last notification request completed. Same as `last_in`.
+    last_notify: Option<u32>,
 }
 
 /// One exported virtual serial device.
@@ -71,8 +80,10 @@ impl VirtualDevice {
                 notified: None,
                 conn: None,
                 control_open: false,
-                reading: false,
+                port_open: false,
+                notify_active: false,
                 last_in: None,
+                last_notify: None,
             }),
             data_ready: Condvar::new(),
         }
@@ -87,9 +98,9 @@ impl VirtualDevice {
         self.state.lock().conn.is_some()
     }
 
-    /// A program has the COM port open (the host is reading).
+    /// A program has the COM port open.
     pub fn is_port_open(&self) -> bool {
-        self.state.lock().reading
+        self.state.lock().port_open
     }
 
     /// Closes the client connection, which unplugs the device.
@@ -127,8 +138,10 @@ impl VirtualDevice {
         st.conn = None;
         st.pending_in.clear();
         st.pending_notify.clear();
-        st.reading = false;
+        st.port_open = false;
+        st.notify_active = false;
         st.last_in = None;
+        st.last_notify = None;
         st.cdc.dtr = false;
         st.cdc.rts = false;
         st.cdc.configured = false;
@@ -160,10 +173,7 @@ impl VirtualDevice {
                 send(&mut st, &p::encode_ret_submit(s.seqnum, 0, &[], n));
             }
             cdc::EP_DATA_IN if s.direction == p::DIR_IN => {
-                if !st.reading {
-                    st.reading = true;
-                    tracing::info!("virtual device {}: a program opened the port", self.info.busid);
-                }
+                self.mark_open(&mut st);
                 st.pending_in.push_back(Pending {
                     seqnum: s.seqnum,
                     length: s.length,
@@ -171,6 +181,8 @@ impl VirtualDevice {
                 flush_in(&mut st);
             }
             cdc::EP_NOTIFY if s.direction == p::DIR_IN => {
+                self.mark_open(&mut st);
+                st.notify_active = true;
                 st.pending_notify.push_back(Pending {
                     seqnum: s.seqnum,
                     length: s.length,
@@ -181,18 +193,49 @@ impl VirtualDevice {
         }
     }
 
+    fn mark_open(&self, st: &mut DevState) {
+        if !st.port_open {
+            st.port_open = true;
+            tracing::info!("virtual device {}: a program opened the port", self.info.busid);
+        }
+    }
+
     fn on_unlink(&self, seqnum: u32, victim: u32) {
         let mut st = self.state.lock();
+        let crossed_read = st.last_in.as_ref().is_some_and(|(seq, _)| *seq == victim);
+        if crossed_read && let Some((_, data)) = st.last_in.take() {
+            // The host cancelled this read before our completion reached it
+            // and dropped the data: it goes out again with the next read.
+            tracing::debug!(
+                "virtual device {}: a read was cancelled as it completed; resending {} bytes",
+                self.info.busid,
+                data.len()
+            );
+            let mut again = VecDeque::from(data);
+            again.append(&mut st.to_host);
+            st.to_host = again;
+        }
+        let cancels_read = crossed_read || st.pending_in.iter().any(|q| q.seqnum == victim);
+        let cancels_notify =
+            st.last_notify == Some(victim) || st.pending_notify.iter().any(|q| q.seqnum == victim);
         let before = st.pending_in.len() + st.pending_notify.len();
-        let cancels_read = st.last_in == Some(victim) || st.pending_in.iter().any(|q| q.seqnum == victim);
         st.pending_in.retain(|q| q.seqnum != victim);
         st.pending_notify.retain(|q| q.seqnum != victim);
         let removed = before != st.pending_in.len() + st.pending_notify.len();
-        if cancels_read && st.pending_in.is_empty() && st.reading {
-            // The program closed the port. Its successor must not get old data.
-            st.reading = false;
-            st.to_host.clear();
-            tracing::info!("virtual device {}: the program closed the port", self.info.busid);
+        if cancels_notify && st.pending_notify.is_empty() {
+            st.notify_active = false;
+        }
+        if (cancels_read || cancels_notify) && st.port_open && st.pending_in.is_empty() {
+            if st.notify_active {
+                // usbser.sys stopped reading because its buffer is full.
+                // Keep the data: it reads again once the program does.
+                tracing::debug!("virtual device {}: the program is not reading", self.info.busid);
+            } else {
+                // The program closed the port. Its successor must not get old data.
+                st.port_open = false;
+                st.to_host.clear();
+                tracing::info!("virtual device {}: the program closed the port", self.info.busid);
+            }
         }
         let status = if removed { p::ECONNRESET } else { 0 };
         send(&mut st, &p::encode_ret_unlink(seqnum, status));
@@ -219,7 +262,7 @@ fn flush_in(st: &mut DevState) {
         let chunk: Vec<u8> = st.to_host.drain(..n).collect();
         let msg = p::encode_ret_submit(req.seqnum, 0, &chunk, n);
         send(st, &msg);
-        st.last_in = Some(req.seqnum);
+        st.last_in = Some((req.seqnum, chunk));
     }
 }
 
@@ -238,6 +281,7 @@ fn flush_notify(st: &mut DevState) {
         let msg = p::encode_ret_submit(req.seqnum, 0, &data, data.len());
         send(st, &msg);
         st.notified = Some(bits);
+        st.last_notify = Some(req.seqnum);
     }
 }
 
@@ -259,7 +303,7 @@ impl ControlChannel for DeviceChannel {
 
     fn write(&self, data: &[u8]) -> io::Result<usize> {
         let mut st = self.0.state.lock();
-        if st.conn.is_none() || !st.reading {
+        if st.conn.is_none() || !st.port_open {
             // No program has the port open: accept and drop, like a cable
             // with nothing on the other end.
             return Ok(data.len());
@@ -275,7 +319,7 @@ impl ControlChannel for DeviceChannel {
         let st = self.0.state.lock();
         Some(ControlState {
             version: serialloom_proto::PORT_STATE_VERSION,
-            com_open: u32::from(st.reading),
+            com_open: u32::from(st.port_open),
             baud_rate: st.cdc.line.baud_rate,
             data_bits: st.cdc.line.data_bits,
             parity: st.cdc.line.parity,
@@ -598,6 +642,92 @@ mod tests {
         assert!(dev.is_port_open());
         assert_eq!(channel.write(b"new").unwrap(), 3);
         assert_eq!(host.ret(), (5, 0, b"new".to_vec()));
+    }
+
+    /// Issue #14: usbser.sys cancels its read while its receive buffer is
+    /// full and keeps the notification pipe running. Only a close cancels both.
+    #[test]
+    fn full_receive_buffer_is_not_a_close() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST5");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+
+        // Program opens the port: a read and the notification pipe.
+        host.submit(1, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(2, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        host.sync(3);
+        assert!(dev.is_port_open());
+
+        // The buffer is full: only the read is cancelled. Data waits.
+        host.unlink(4, 1);
+        assert_eq!(ret_out(&mut host), (4, p::ECONNRESET));
+        assert!(dev.is_port_open());
+        assert_eq!(channel.write(b"kept").unwrap(), 4);
+        assert_eq!(channel.state().unwrap().to_com_queued, 4);
+
+        // The program reads again and gets it.
+        host.submit(5, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        assert_eq!(host.ret(), (5, 0, b"kept".to_vec()));
+
+        // Closing cancels the read, then the notification pipe.
+        host.submit(6, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.unlink(7, 6);
+        assert_eq!(ret_out(&mut host), (7, p::ECONNRESET));
+        assert_eq!(channel.write(b"stale").unwrap(), 5);
+        host.unlink(8, 2);
+        assert_eq!(ret_out(&mut host), (8, p::ECONNRESET));
+        assert!(!dev.is_port_open());
+        assert_eq!(channel.state().unwrap().to_com_queued, 0);
+    }
+
+    /// The buffer fills just as SerialLoom completes the read: usbip-win2
+    /// drops that completion, so its data must go out again, in order.
+    #[test]
+    fn pause_crossing_a_completion_sends_it_again() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST7");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = dev.open_control().unwrap();
+
+        host.submit(1, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(2, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        host.sync(3);
+        assert_eq!(channel.write(b"abcd").unwrap(), 4);
+        assert_eq!(host.ret(), (1, 0, b"abcd".to_vec()));
+
+        // The cancel crosses that completion; more data arrives meanwhile.
+        host.unlink(4, 1);
+        assert_eq!(ret_out(&mut host), (4, 0));
+        assert!(dev.is_port_open());
+        assert_eq!(channel.write(b"ef").unwrap(), 2);
+
+        host.submit(5, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        assert_eq!(host.ret(), (5, 0, b"abcdef".to_vec()));
+    }
+
+    #[test]
+    fn close_crossing_a_notification_is_seen() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST6");
+        let mut host = Client::import(server.port(), dev.busid());
+        host.submit(1, p::DIR_OUT, 0, 0, [0x00, 9, 1, 0, 0, 0, 0, 0], &[]);
+        assert_eq!(ret_out(&mut host), (1, 0));
+
+        // Program opens the port; the first notification completes at once.
+        host.submit(2, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(3, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        let (seq, status, data) = host.ret();
+        assert_eq!((seq, status, data.len()), (3, 0, 10));
+        assert!(dev.is_port_open());
+
+        // It closes before usbser.sys resubmits: the cancel crosses that completion.
+        host.unlink(4, 2);
+        assert_eq!(ret_out(&mut host), (4, p::ECONNRESET));
+        assert!(dev.is_port_open());
+        host.unlink(5, 3);
+        assert_eq!(ret_out(&mut host), (5, 0));
+        assert!(!dev.is_port_open());
     }
 
     #[test]

@@ -38,6 +38,18 @@ pub trait ControlChannel: Send + Sync {
 
     /// What the program on the COM side has configured, when available.
     fn state(&self) -> Option<ControlState>;
+
+    /// The program's DTR, for wiring the other end of a pair: on while a
+    /// program has the port open with DTR on (closing the port drops it, as
+    /// on a real port). `None` when the driver cannot tell. A change also
+    /// ends a waiting [`read`](Self::read) early, so it is passed on at once.
+    fn output_dtr(&self) -> Option<bool> {
+        None
+    }
+
+    /// For a port opened with [`PortDriver::open_paired`]: the DTR of the
+    /// program at the other end, which the program here sees as DSR and DCD.
+    fn set_peer_dtr(&self, _dtr: bool) {}
 }
 
 pub trait PortDriver: Send + Sync {
@@ -70,6 +82,15 @@ pub trait PortDriver: Send + Sync {
 
     /// Opens the control side of a virtual port.
     fn open_control(&self, port: &str) -> Result<Box<dyn ControlChannel>>;
+
+    /// Opens the control side of one end of a virtual null-modem pair. Its
+    /// DSR and DCD start off, then follow the other end's DTR (see
+    /// [`ControlChannel::set_peer_dtr`]). Drivers that cannot do this open
+    /// the port as [`open_control`](Self::open_control) does: DSR and DCD
+    /// are on while SerialLoom is attached.
+    fn open_paired(&self, port: &str) -> Result<Box<dyn ControlChannel>> {
+        self.open_control(port)
+    }
 }
 
 /// Accepts `COM1`..`COM255` and `COM#`. Names end up in a command line run

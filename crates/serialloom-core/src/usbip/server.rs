@@ -52,12 +52,17 @@ struct DevState {
     pending_out: VecDeque<Pending>,
     /// When usbser.sys last asked for data (the program is reading).
     last_read: Option<Instant>,
-    /// Last SERIAL_STATE sent; `None` before the first one.
+    /// Last SERIAL_STATE sent; `None` before the first one and after the
+    /// program closed the port, so each program gets the lines at once.
     notified: Option<u16>,
     /// Writer half of the client connection while imported.
     conn: Option<TcpStream>,
     /// SerialLoom has the control side open.
     control_open: bool,
+    /// One end of a null-modem pair: the other program's DTR, which the
+    /// program here sees as DSR and DCD. `None`: they are on while
+    /// SerialLoom has the control side open.
+    peer_dtr: Option<bool>,
     /// A program has the COM port open. usbser.sys starts reading (bulk IN)
     /// and the notification pipe (interrupt IN) when a program opens the
     /// port, and cancels both when it closes the port. A read cancelled
@@ -99,6 +104,7 @@ impl VirtualDevice {
                 notified: None,
                 conn: None,
                 control_open: false,
+                peer_dtr: None,
                 port_open: false,
                 notify_active: false,
                 last_in: None,
@@ -132,6 +138,16 @@ impl VirtualDevice {
 
     /// Opens the SerialLoom side. Only one at a time.
     pub fn open_control(self: &Arc<Self>) -> io::Result<DeviceChannel> {
+        self.open(None)
+    }
+
+    /// Opens the SerialLoom side as one end of a null-modem pair: DSR and
+    /// DCD stay off until [`ControlChannel::set_peer_dtr`] says otherwise.
+    pub fn open_paired(self: &Arc<Self>) -> io::Result<DeviceChannel> {
+        self.open(Some(false))
+    }
+
+    fn open(self: &Arc<Self>, peer_dtr: Option<bool>) -> io::Result<DeviceChannel> {
         let mut st = self.state.lock();
         if st.control_open {
             return Err(io::Error::new(
@@ -140,6 +156,7 @@ impl VirtualDevice {
             ));
         }
         st.control_open = true;
+        st.peer_dtr = peer_dtr;
         st.from_host.clear();
         flush_notify(&mut st);
         Ok(DeviceChannel(Arc::clone(self)))
@@ -169,13 +186,21 @@ impl VirtualDevice {
         st.cdc.dtr = false;
         st.cdc.rts = false;
         st.cdc.configured = false;
+        // The other end of a pair sees DTR drop.
+        self.data_ready.notify_all();
     }
 
     fn on_submit(&self, s: Submit) {
         let mut st = self.state.lock();
         match s.ep {
             0 => {
+                let before = output_dtr(&st);
                 let reply = st.cdc.control(&s.setup, &s.data);
+                if output_dtr(&st) != before {
+                    // DTR for the other end of a pair: wake the hub, which
+                    // waits in `read`.
+                    self.data_ready.notify_all();
+                }
                 let msg = match reply {
                     ControlReply::Data(d) if s.direction == p::DIR_IN => {
                         p::encode_ret_submit(s.seqnum, 0, &d, d.len())
@@ -232,6 +257,8 @@ impl VirtualDevice {
     fn mark_open(&self, st: &mut DevState) {
         if !st.port_open {
             st.port_open = true;
+            // Its DTR now counts for the other end of a pair.
+            self.data_ready.notify_all();
             tracing::info!("virtual device {}: a program opened the port", self.info.busid);
         }
     }
@@ -279,10 +306,13 @@ impl VirtualDevice {
                 // Keep the data: it reads again once the program does.
                 tracing::debug!("virtual device {}: the program is not reading", self.info.busid);
             } else {
-                // The program closed the port. Its successor must not get old data.
+                // The program closed the port. Its successor must not get
+                // old data, and gets DSR/DCD at once.
                 st.port_open = false;
                 st.to_host.clear();
+                st.notified = None;
                 self.room.notify_all();
+                self.data_ready.notify_all();
                 tracing::info!("virtual device {}: the program closed the port", self.info.busid);
             }
         }
@@ -326,12 +356,20 @@ fn flush_in(st: &mut DevState) {
     }
 }
 
-/// Reports DCD/DSR (SerialLoom attached or not) when it changes.
+/// The program's DTR as the other end of a null-modem pair sees it: off
+/// while no program has the port open, as on a real port.
+fn output_dtr(st: &DevState) -> bool {
+    st.port_open && st.cdc.dtr
+}
+
+/// Reports DCD/DSR when they change: on while SerialLoom is attached, or
+/// for one end of a pair, while the other program has DTR on.
 fn flush_notify(st: &mut DevState) {
     if !st.cdc.configured {
         return;
     }
-    let bits: u16 = if st.control_open { 0x3 } else { 0x0 };
+    let up = st.control_open && st.peer_dtr.unwrap_or(true);
+    let bits: u16 = if up { 0x3 } else { 0x0 };
     if st.notified == Some(bits) {
         return;
     }
@@ -387,6 +425,18 @@ impl ControlChannel for DeviceChannel {
             to_com_total: 0,
         })
     }
+
+    fn output_dtr(&self) -> Option<bool> {
+        Some(output_dtr(&self.0.state.lock()))
+    }
+
+    fn set_peer_dtr(&self, dtr: bool) {
+        let mut st = self.0.state.lock();
+        if st.peer_dtr.is_some() {
+            st.peer_dtr = Some(dtr);
+            flush_notify(&mut st);
+        }
+    }
 }
 
 impl DeviceChannel {
@@ -423,6 +473,7 @@ impl Drop for DeviceChannel {
     fn drop(&mut self) {
         let mut st = self.0.state.lock();
         st.control_open = false;
+        st.peer_dtr = None;
         st.from_host.clear();
         release_out(&mut st);
         flush_notify(&mut st);
@@ -814,6 +865,142 @@ mod tests {
         host.unlink(5, 3);
         assert_eq!(ret_out(&mut host), (5, 0));
         assert!(!dev.is_port_open());
+    }
+
+    const SET_CONFIGURATION: [u8; 8] = [0x00, 9, 1, 0, 0, 0, 0, 0];
+
+    /// SET_CONTROL_LINE_STATE with DTR on or off (RTS on).
+    fn set_dtr(dtr: bool) -> [u8; 8] {
+        [0x21, 0x22, 0x2 | u8::from(dtr), 0, 0, 0, 0, 0]
+    }
+
+    /// Reads a SERIAL_STATE notification: (seqnum, DCD/DSR bits).
+    fn serial_state(host: &mut Client) -> (u32, u16) {
+        let (seq, status, data) = host.ret();
+        assert_eq!((status, data.len(), &data[..2]), (0, 10, &[0xA1, 0x20][..]));
+        (seq, u16::from_le_bytes([data[8], data[9]]))
+    }
+
+    /// Issue #17: one end of a null-modem pair sees the other end's DTR as
+    /// DSR and DCD.
+    #[test]
+    fn paired_port_follows_peer_dtr() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST14");
+        let mut host = Client::import(server.port(), dev.busid());
+        host.submit(1, p::DIR_OUT, 0, 0, SET_CONFIGURATION, &[]);
+        assert_eq!(ret_out(&mut host), (1, 0));
+        let channel = dev.open_paired().unwrap();
+
+        // DTR before the port counts as open is not passed on.
+        host.submit(2, p::DIR_OUT, 0, 0, set_dtr(true), &[]);
+        assert_eq!(ret_out(&mut host), (2, 0));
+        assert_eq!(channel.output_dtr(), Some(false));
+
+        // Program opens the port. Nothing at the other end: DSR/DCD off.
+        host.submit(3, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(4, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        assert_eq!(serial_state(&mut host), (4, 0));
+        assert_eq!(channel.output_dtr(), Some(true));
+
+        // The other program raises DTR, then drops it.
+        host.submit(5, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        channel.set_peer_dtr(true);
+        assert_eq!(serial_state(&mut host), (5, 0x3));
+        host.submit(6, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        channel.set_peer_dtr(true); // no change, no notification
+        host.sync(7);
+        channel.set_peer_dtr(false);
+        assert_eq!(serial_state(&mut host), (6, 0));
+
+        // The program drops DTR (usbser.sys leaves RTS on).
+        host.submit(8, p::DIR_OUT, 0, 0, set_dtr(false), &[]);
+        assert_eq!(ret_out(&mut host), (8, 0));
+        assert_eq!(channel.output_dtr(), Some(false));
+        host.submit(9, p::DIR_OUT, 0, 0, set_dtr(true), &[]);
+        assert_eq!(ret_out(&mut host), (9, 0));
+
+        // Closing the port drops its DTR for the other end, and the next
+        // program gets DSR/DCD at once.
+        host.submit(10, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        host.unlink(11, 3);
+        assert_eq!(ret_out(&mut host), (11, p::ECONNRESET));
+        assert!(dev.is_port_open(), "only the read: a pause");
+        assert_eq!(channel.output_dtr(), Some(true));
+        host.unlink(12, 10);
+        assert_eq!(ret_out(&mut host), (12, p::ECONNRESET));
+        assert!(!dev.is_port_open());
+        assert_eq!(channel.output_dtr(), Some(false));
+        channel.set_peer_dtr(true);
+        host.submit(13, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(14, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        assert_eq!(serial_state(&mut host), (14, 0x3));
+        assert_eq!(channel.output_dtr(), Some(true));
+
+        // SerialLoom lets go of the port: DSR/DCD off.
+        host.submit(15, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        drop(channel);
+        assert_eq!(serial_state(&mut host), (15, 0));
+    }
+
+    /// Ports outside a pair keep DSR/DCD on while SerialLoom is attached.
+    #[test]
+    fn unpaired_port_ignores_peer_dtr() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST15");
+        let mut host = Client::import(server.port(), dev.busid());
+        host.submit(1, p::DIR_OUT, 0, 0, SET_CONFIGURATION, &[]);
+        assert_eq!(ret_out(&mut host), (1, 0));
+        let channel = dev.open_control().unwrap();
+        host.submit(2, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(3, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        assert_eq!(serial_state(&mut host), (3, 0x3));
+
+        host.submit(4, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        channel.set_peer_dtr(false);
+        host.sync(5);
+
+        // Reopening the port reports DSR/DCD again.
+        host.unlink(6, 2);
+        assert_eq!(ret_out(&mut host), (6, p::ECONNRESET));
+        host.unlink(7, 4);
+        assert_eq!(ret_out(&mut host), (7, p::ECONNRESET));
+        host.submit(8, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.submit(9, p::DIR_IN, cdc::EP_NOTIFY, 10, [0; 8], &[]);
+        assert_eq!(serial_state(&mut host), (9, 0x3));
+    }
+
+    /// The hub waits in `read`; a DTR change ends that wait, so the other
+    /// end of a pair sees it at once.
+    #[test]
+    fn dtr_changes_wake_the_hub() {
+        let server = UsbipServer::start().unwrap();
+        let dev = server.add_device("SLTEST16");
+        let mut host = Client::import(server.port(), dev.busid());
+        let channel = Arc::new(dev.open_paired().unwrap());
+        host.submit(1, p::DIR_IN, cdc::EP_DATA_IN, 64, [0; 8], &[]);
+        host.sync(2);
+
+        for (seq, dtr) in [(3, true), (4, false)] {
+            let reader = {
+                let channel = Arc::clone(&channel);
+                std::thread::spawn(move || {
+                    let t = Instant::now();
+                    let mut buf = [0u8; 8];
+                    (
+                        channel.read(&mut buf, Duration::from_secs(5)).unwrap(),
+                        t.elapsed(),
+                    )
+                })
+            };
+            std::thread::sleep(Duration::from_millis(50));
+            host.submit(seq, p::DIR_OUT, 0, 0, set_dtr(dtr), &[]);
+            assert_eq!(ret_out(&mut host), (seq, 0));
+            let (n, waited) = reader.join().unwrap();
+            assert_eq!(n, 0);
+            assert!(waited < Duration::from_secs(2), "waited {waited:?}");
+            assert_eq!(channel.output_dtr(), Some(dtr));
+        }
     }
 
     /// Reads from the control side until `len` bytes arrived.

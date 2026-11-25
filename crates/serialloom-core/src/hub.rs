@@ -154,6 +154,10 @@ impl Monitor {
 
 struct Shared {
     kind: HubKind,
+    /// Two virtual ports bridged together: each program's DTR reaches the
+    /// other as DSR and DCD, as through a null-modem cable. Elsewhere DSR
+    /// and DCD are on while SerialLoom is attached.
+    null_modem: bool,
     stop: AtomicBool,
     /// Per endpoint: its sender can be held back while a target is slow.
     /// Not a real serial port: its device keeps sending (SerialLoom opens
@@ -214,6 +218,52 @@ impl Shared {
         self.writers[idx].lock().take();
         self.counters[idx].connected.store(false, Ordering::Relaxed);
     }
+
+    /// The virtual port attached at `idx`, if any.
+    fn channel(&self, idx: usize) -> Option<Arc<dyn ControlChannel>> {
+        match self.writers[idx].lock().as_ref()? {
+            Writer::Channel(c) => Some(Arc::clone(c)),
+            Writer::Stream(_) => None,
+        }
+    }
+
+    /// Null-modem pair: the other end of `idx`.
+    fn peer(&self, idx: usize) -> Option<Arc<dyn ControlChannel>> {
+        self.channel(1 - idx)
+    }
+
+    /// Null-modem pair: the program at `idx` sees the other end's DTR as it
+    /// is now (off while nothing is attached there). Changes are passed on
+    /// as they happen; this also runs now and then, so a change that
+    /// crossed an attach cannot leave a stale line behind.
+    fn follow_peer(&self, idx: usize, channel: &dyn ControlChannel) {
+        let dtr = self.peer(idx).and_then(|p| p.output_dtr()).unwrap_or(false);
+        channel.set_peer_dtr(dtr);
+    }
+
+    /// Null-modem pair: `channel` (at `idx`) was just attached. Both ends
+    /// take over each other's DTR. Returns the DTR passed on.
+    fn wire_attached(&self, idx: usize, channel: &dyn ControlChannel) -> Option<bool> {
+        self.follow_peer(idx, channel);
+        let own = channel.output_dtr();
+        if let (Some(dtr), Some(peer)) = (own, self.peer(idx)) {
+            peer.set_peer_dtr(dtr);
+        }
+        own
+    }
+
+    /// Null-modem pair: passes a change of the program's DTR at `idx` to
+    /// the other end. Returns the DTR passed on.
+    fn pass_dtr(&self, idx: usize, channel: &dyn ControlChannel, last: Option<bool>) -> Option<bool> {
+        let now = channel.output_dtr();
+        if let Some(dtr) = now
+            && now != last
+            && let Some(peer) = self.peer(idx)
+        {
+            peer.set_peer_dtr(dtr);
+        }
+        now
+    }
 }
 
 fn is_transient(e: &io::Error) -> bool {
@@ -257,6 +307,11 @@ impl HubRuntime {
         let count = endpoints.len();
         let shared = Arc::new(Shared {
             kind: spec.kind,
+            null_modem: spec.kind == HubKind::Bridge
+                && count == 2
+                && endpoints
+                    .iter()
+                    .all(|e| matches!(e, EndpointSpec::Virtual { .. })),
             stop: AtomicBool::new(false),
             holdable: endpoints
                 .iter()
@@ -396,7 +451,12 @@ fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
     let counters = &sh.counters[idx];
     let mut buf = vec![0u8; 4096];
     while !sh.stopped() {
-        let channel: Arc<dyn ControlChannel> = match driver.open_control(port) {
+        let opened = if sh.null_modem {
+            driver.open_paired(port)
+        } else {
+            driver.open_control(port)
+        };
+        let channel: Arc<dyn ControlChannel> = match opened {
             Ok(c) => Arc::from(c),
             Err(e) => {
                 counters.set_error(format!("cannot attach to {port}: {e}"));
@@ -406,11 +466,22 @@ fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
         };
         sh.attach(idx, Writer::Channel(Arc::clone(&channel)));
         tracing::info!("attached to virtual port {port}");
+        let mut dtr = if sh.null_modem {
+            sh.wire_attached(idx, channel.as_ref())
+        } else {
+            None
+        };
 
         let mut polled = Instant::now() - STATE_POLL;
         while !sh.stopped() {
+            if sh.null_modem {
+                dtr = sh.pass_dtr(idx, channel.as_ref(), dtr);
+            }
             if polled.elapsed() >= STATE_POLL {
                 polled = Instant::now();
+                if sh.null_modem {
+                    sh.follow_peer(idx, channel.as_ref());
+                }
                 let state = channel.state().filter(|s| s.com_open != 0);
                 counters.peer_open.store(state.is_some(), Ordering::Relaxed);
                 *counters.line.lock() = state.map(|s| {
@@ -435,6 +506,12 @@ fn virtual_loop(idx: usize, port: &str, driver: &dyn PortDriver, sh: &Shared) {
             }
         }
         sh.detach(idx);
+        if sh.null_modem
+            && let Some(peer) = sh.peer(idx)
+        {
+            // Nothing drives this end any more, like an unplugged cable.
+            peer.set_peer_dtr(false);
+        }
         counters.peer_open.store(false, Ordering::Relaxed);
         *counters.line.lock() = None;
         if !sh.stopped() {
@@ -681,6 +758,7 @@ mod tests {
         let n = holdable.len();
         Shared {
             kind,
+            null_modem: false,
             stop: AtomicBool::new(false),
             holdable,
             writers: (0..n).map(|_| Mutex::new(None)).collect(),
@@ -739,6 +817,219 @@ mod tests {
         sh.counters[1].set_error("connection lost: reset".into());
         sh.route(0, b"more");
         assert_eq!(status(&sh).last_error.as_deref(), Some("connection lost: reset"));
+    }
+
+    /// A virtual port whose program's lines the test sets. Records what the
+    /// hub tells it about the other end.
+    #[derive(Default)]
+    struct Wire {
+        dtr: AtomicBool,
+        /// `None` unless opened as one end of a pair.
+        peer_dtr: Mutex<Option<bool>>,
+        attached: AtomicBool,
+        /// Reads fail, as when the port goes away.
+        broken: AtomicBool,
+    }
+
+    struct WireChannel(Arc<Wire>);
+
+    impl ControlChannel for WireChannel {
+        fn read(&self, _buf: &mut [u8], timeout: Duration) -> io::Result<usize> {
+            if self.0.broken.load(Ordering::Relaxed) {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "gone"));
+            }
+            std::thread::sleep(timeout.min(Duration::from_millis(5)));
+            Ok(0)
+        }
+
+        fn write(&self, data: &[u8]) -> io::Result<usize> {
+            Ok(data.len())
+        }
+
+        fn state(&self) -> Option<crate::driver::ControlState> {
+            None
+        }
+
+        fn output_dtr(&self) -> Option<bool> {
+            Some(self.0.dtr.load(Ordering::Relaxed))
+        }
+
+        fn set_peer_dtr(&self, dtr: bool) {
+            let mut slot = self.0.peer_dtr.lock();
+            if slot.is_some() {
+                *slot = Some(dtr);
+            }
+        }
+    }
+
+    impl Drop for WireChannel {
+        fn drop(&mut self) {
+            *self.0.peer_dtr.lock() = None;
+            self.0.attached.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Serves `Wire`s by port name.
+    struct WireDriver(Vec<(String, Arc<Wire>)>);
+
+    impl WireDriver {
+        fn open(&self, port: &str, paired: bool) -> crate::error::Result<Box<dyn ControlChannel>> {
+            let (_, wire) = self.0.iter().find(|(n, _)| n == port).expect("known port");
+            *wire.peer_dtr.lock() = paired.then_some(false);
+            wire.attached.store(true, Ordering::Relaxed);
+            Ok(Box::new(WireChannel(Arc::clone(wire))))
+        }
+    }
+
+    impl PortDriver for WireDriver {
+        fn info(&self) -> crate::model::DriverInfo {
+            crate::model::DriverInfo {
+                id: "wire".into(),
+                name: "test".into(),
+                available: true,
+                installable: false,
+                location: None,
+                message: None,
+            }
+        }
+
+        fn list_ports(&self) -> crate::error::Result<Vec<crate::model::VirtualPortInfo>> {
+            Ok(Vec::new())
+        }
+
+        fn create_ports(
+            &self,
+            _names: &[String],
+        ) -> crate::error::Result<Vec<crate::model::VirtualPortInfo>> {
+            Ok(Vec::new())
+        }
+
+        fn remove_ports(&self, _names: &[String]) -> crate::error::Result<()> {
+            Ok(())
+        }
+
+        fn open_control(&self, port: &str) -> crate::error::Result<Box<dyn ControlChannel>> {
+            self.open(port, false)
+        }
+
+        fn open_paired(&self, port: &str) -> crate::error::Result<Box<dyn ControlChannel>> {
+            self.open(port, true)
+        }
+    }
+
+    fn virt(port: &str) -> HubEndpoint {
+        ep(EndpointSpec::Virtual { port: port.into() })
+    }
+
+    fn start_wired(
+        kind: HubKind,
+        master: HubEndpoint,
+        members: Vec<HubEndpoint>,
+        wires: &[Arc<Wire>],
+    ) -> HubRuntime {
+        let names = ["COM1", "COM2", "COM3"];
+        let driver = WireDriver(
+            wires
+                .iter()
+                .zip(names)
+                .map(|(w, n)| (n.to_string(), Arc::clone(w)))
+                .collect(),
+        );
+        let spec = HubSpec {
+            id: "w".into(),
+            name: "wired".into(),
+            kind,
+            master,
+            members,
+            autostart: false,
+        };
+        HubRuntime::start(&spec, Arc::new(driver))
+    }
+
+    /// Waits until `f` holds.
+    fn eventually(what: &str, f: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !f() {
+            assert!(Instant::now() < deadline, "timed out waiting for: {what}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn peer_dtr(w: &Wire) -> Option<bool> {
+        *w.peer_dtr.lock()
+    }
+
+    /// Issue #17: a virtual pair is a null-modem cable. Each program's DTR
+    /// reaches the other end as DSR/DCD.
+    #[test]
+    fn virtual_pair_wires_dtr() {
+        let wires: Vec<Arc<Wire>> = (0..2).map(|_| Arc::new(Wire::default())).collect();
+        let (a, b) = (&wires[0], &wires[1]);
+        // A program already has COM1 open with DTR on when the pair starts.
+        a.dtr.store(true, Ordering::Relaxed);
+        let hub = start_wired(HubKind::Bridge, virt("COM1"), vec![virt("COM2")], &wires);
+        eventually("both attached", || {
+            a.attached.load(Ordering::Relaxed) && b.attached.load(Ordering::Relaxed)
+        });
+        eventually("COM2 sees COM1's DTR", || peer_dtr(b) == Some(true));
+        eventually("COM1 sees COM2's DTR off", || peer_dtr(a) == Some(false));
+
+        b.dtr.store(true, Ordering::Relaxed);
+        eventually("COM1 sees COM2 raise DTR", || peer_dtr(a) == Some(true));
+        a.dtr.store(false, Ordering::Relaxed);
+        eventually("COM2 sees COM1 drop DTR", || peer_dtr(b) == Some(false));
+        a.dtr.store(true, Ordering::Relaxed);
+        eventually("COM2 sees COM1 raise DTR", || peer_dtr(b) == Some(true));
+
+        // Stopping the pair releases both ports from the wiring.
+        drop(hub);
+        assert_eq!((peer_dtr(a), peer_dtr(b)), (None, None));
+    }
+
+    /// When SerialLoom loses one end, the other sees DTR drop, like an
+    /// unplugged cable; once it is back, the wiring is restored.
+    #[test]
+    fn losing_one_end_drops_its_dtr() {
+        let wires: Vec<Arc<Wire>> = (0..2).map(|_| Arc::new(Wire::default())).collect();
+        let (a, b) = (&wires[0], &wires[1]);
+        a.dtr.store(true, Ordering::Relaxed);
+        b.dtr.store(true, Ordering::Relaxed);
+        let _hub = start_wired(HubKind::Bridge, virt("COM1"), vec![virt("COM2")], &wires);
+        eventually("wired", || peer_dtr(a) == Some(true) && peer_dtr(b) == Some(true));
+
+        a.broken.store(true, Ordering::Relaxed);
+        eventually("COM2 sees DTR drop", || peer_dtr(b) == Some(false));
+        a.broken.store(false, Ordering::Relaxed);
+        eventually("COM1 is back", || peer_dtr(a) == Some(true));
+        eventually("COM2 sees DTR again", || peer_dtr(b) == Some(true));
+    }
+
+    /// Only two virtual ports bridged together are wired. Elsewhere the
+    /// lines keep following SerialLoom's side, as before.
+    #[test]
+    fn other_hubs_are_not_wired() {
+        let tcp = ep(EndpointSpec::TcpServer {
+            bind: format!("127.0.0.1:{}", free_port()),
+        });
+        let cases = [
+            (HubKind::Bridge, virt("COM1"), vec![tcp], 1),
+            (HubKind::Split, virt("COM1"), vec![virt("COM2"), virt("COM3")], 3),
+            (HubKind::Bus, virt("COM1"), vec![virt("COM2")], 2),
+        ];
+        for (kind, master, members, ports) in cases {
+            let wires: Vec<Arc<Wire>> = (0..ports).map(|_| Arc::new(Wire::default())).collect();
+            for w in &wires {
+                w.dtr.store(true, Ordering::Relaxed);
+            }
+            let _hub = start_wired(kind, master, members, &wires);
+            eventually("attached", || {
+                wires.iter().all(|w| w.attached.load(Ordering::Relaxed))
+            });
+            std::thread::sleep(Duration::from_millis(100));
+            for w in &wires {
+                assert_eq!(peer_dtr(w), None, "{kind:?}: not opened as a pair");
+            }
+        }
     }
 
     #[test]

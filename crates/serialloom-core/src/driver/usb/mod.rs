@@ -159,6 +159,16 @@ impl UsbDriver {
         system::com_port_for_serial(&saved.serial).or_else(|| saved.name.clone())
     }
 
+    /// The virtual device behind a COM port.
+    fn device(&self, port: &str) -> Result<Arc<VirtualDevice>> {
+        self.ports
+            .lock()
+            .iter()
+            .find(|p| Self::current_name(&p.saved).is_some_and(|n| n.eq_ignore_ascii_case(port)))
+            .map(|p| Arc::clone(&p.device))
+            .ok_or_else(|| Error::NotFound(format!("virtual port {port}")))
+    }
+
     /// Waits until Windows names the device's COM port (optionally a
     /// specific name, after a rename) and returns it.
     fn wait_for_name(serial: &str, want: Option<&str>) -> Result<String> {
@@ -474,11 +484,10 @@ impl PortDriver for UsbDriver {
     }
 
     fn open_control(&self, port: &str) -> Result<Box<dyn ControlChannel>> {
-        let ports = self.ports.lock();
-        let found = ports
-            .iter()
-            .find(|p| Self::current_name(&p.saved).is_some_and(|n| n.eq_ignore_ascii_case(port)))
-            .ok_or_else(|| Error::NotFound(format!("virtual port {port}")))?;
-        Ok(Box::new(found.device.open_control()?))
+        Ok(Box::new(self.device(port)?.open_control()?))
+    }
+
+    fn open_paired(&self, port: &str) -> Result<Box<dyn ControlChannel>> {
+        Ok(Box::new(self.device(port)?.open_paired()?))
     }
 }

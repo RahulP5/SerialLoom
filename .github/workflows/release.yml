@@ -42,11 +42,12 @@ jobs:
           releaseBody: |
             **Virtual COM port manager for Windows** - create, pair, split, join and bridge serial ports with a live visual editor.
 
-            ### What's new in 0.3.0
-            - **Fixed: data lost when a program reads late.** Data sent to a virtual port while the program there was slow to read was dropped, and the port briefly showed as closed. Thanks to @ying-zi-pro for the detailed report (#14).
-            - **Fixed: large writes cut short.** A program that wrote more than 256 KiB at once to a virtual port lost all but the last 256 KiB, and fast writes could lose data the same way. Writes now wait while the other side catches up, as with a busy USB adapter.
-            - **A program that stops reading no longer holds anyone up for long:** data for it waits up to 2 seconds, then is dropped and counted. Data from a real serial port never waits: in a split, the other ports still get everything.
-            - A port that is dropping data shows an amber *program not reading* note, which clears once data flows again (also as `warning` in the automation API).
+            ### What's new in 0.4.0
+            - **SerialLoom in your language:** the app now speaks German, Spanish, Portuguese (Brazil), Russian, Simplified Chinese, Japanese and Korean, besides English. It follows the Windows display language; pick another in *Settings > Appearance > Language*. The installer and the tray menu follow too. Thanks to @zhulinghuanyu for the suggestion (#15).
+            - The translations are new. If something reads wrong in your language, please open an issue with a better wording.
+            - Some messages from Windows and the port driver are still shown in English.
+            - **Virtual pairs now pass DTR across, like a null-modem cable:** each program's DTR shows up at the other port as DSR and DCD (carrier detect), with the matching `EV_DSR`/`EV_RLSD` events, and closing a port drops its DTR. Before, DSR and DCD were always on. A program that waits for DSR or DCD now waits until the program at the other port opens it with DTR on. Thanks to @duxincai for the detailed report (#17).
+            - **New: [what differs from a classic serial port](https://github.com/RahulP5/SerialLoom/blob/main/docs/USB_PORTS.md#limitations)** on ports served by Windows' USB serial driver. With `ReadIntervalTimeout` set (pyserial's `inter_byte_timeout`), a read can return no data before the first byte arrives; use a total timeout only. CTS always reads on, and breaks do not reach the other port. Thanks to @duxincai for tracking this down (#16).
 
             ### Highlights
             - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)
@@ -56,6 +57,7 @@ jobs:
             - Runs in the notification area: closing the window keeps ports open, *Quit SerialLoom* in the tray menu closes them
             - Shows the baud rate and framing each program chose on its virtual port
             - Light and dark themes (or follow Windows)
+            - In English, German, Spanish, Portuguese (Brazil), Russian, Simplified Chinese, Japanese and Korean
             - Scriptable: `serialloom-cli pair` gives a test run its own ports, with no administrator prompts
 
             ### Install

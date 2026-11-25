@@ -7,6 +7,8 @@
 **Weave serial ports together.**
 Create virtual COM ports, split one port between many apps, join ports, and bridge serial devices to the network, all in a live visual editor.
 
+**[Website](https://www.serialloom.com/) · [Download](https://www.serialloom.com/download/)**
+
 [![CI](https://github.com/RahulP5/SerialLoom/actions/workflows/ci.yml/badge.svg)](https://github.com/RahulP5/SerialLoom/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-6366f1.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-22d3ee.svg)
@@ -44,7 +46,7 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 
 ## Install
 
-Download the latest installer from [Releases](https://github.com/RahulP5/SerialLoom/releases) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. The installer also registers SerialLoom Helper, a small service that creates, renumbers and removes SerialLoom's own virtual ports, so Windows does not ask for administrator permission each time. You can remove it in *Settings > Administrator permission*; Windows then asks for each change ([details](docs/AUTOMATION.md#serialloom-helper)).
+Download the latest installer from [serialloom.com](https://www.serialloom.com/download/) (also on [GitHub Releases](https://github.com/RahulP5/SerialLoom/releases)) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. The installer also registers SerialLoom Helper, a small service that creates, renumbers and removes SerialLoom's own virtual ports, so Windows does not ask for administrator permission each time. You can remove it in *Settings > Administrator permission*; Windows then asks for each change ([details](docs/AUTOMATION.md#serialloom-helper)).
 
 Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
 

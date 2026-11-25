@@ -53,7 +53,9 @@
       "nsis": {
         "installMode": "perMachine",
         "installerHooks": "./windows/hooks.nsh",
-        "installerIcon": "icons/icon.ico"
+        "installerIcon": "icons/icon.ico",
+        "languages": ["English", "German", "Spanish", "PortugueseBR", "Russian", "SimpChinese", "Japanese", "Korean"],
+        "displayLanguageSelector": false
       }
     },
     "resources": {

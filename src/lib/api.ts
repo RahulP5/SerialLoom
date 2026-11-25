@@ -45,6 +45,18 @@ export interface Api {
   helperStatus(): Promise<HelperInfo>;
   installHelper(): Promise<HelperInfo>;
   removeHelper(): Promise<HelperInfo>;
+  /** The notification-area menu's wording, in the app's language. */
+  setTrayText(text: TrayText): Promise<void>;
+}
+
+/** `one` and `other` are templates with `{running}` and `{count}`. */
+export interface TrayText {
+  open: string;
+  quit: string;
+  starting: string;
+  noHubs: string;
+  one: string;
+  other: string;
 }
 
 const tauriApi: Api = {
@@ -75,6 +87,7 @@ const tauriApi: Api = {
   helperStatus: () => invoke("helper_status"),
   installHelper: () => invoke("install_helper"),
   removeHelper: () => invoke("remove_helper"),
+  setTrayText: (text) => invoke("set_tray_text", { text }),
 };
 
 /** True inside the desktop app; false in a plain browser (`npm run dev`). */

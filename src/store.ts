@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api, errorText } from "./lib/api";
+import { t } from "./i18n";
 import type {
   AppInfo,
   AppSettings,
@@ -121,7 +122,7 @@ export const useStore = create<State>((set, get) => ({
   },
 
   adminNote(action) {
-    return get().helper?.installed ? action : `${action} (Windows asks for administrator permission)`;
+    return get().helper?.installed ? action : t("common.adminNote", { action });
   },
 
   async refresh() {
@@ -180,12 +181,12 @@ export const useStore = create<State>((set, get) => ({
 
   async saveSettings(s) {
     await get().run(
-      "Saving settings",
+      t("settings.saving"),
       async () => {
         const driver = await api.setSettings(s);
         set({ settings: s, driver });
       },
-      "Settings saved",
+      t("settings.saved"),
     );
   },
 }));

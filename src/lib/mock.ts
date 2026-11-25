@@ -278,5 +278,5 @@ export const mockApi: Api = {
   },
   removeHelper: async () => {
     throw "SerialLoom Helper is not available in the browser preview";
-  },
+  },  setTrayText: async () => {},
 };

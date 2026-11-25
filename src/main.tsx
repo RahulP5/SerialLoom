@@ -4,11 +4,14 @@ import "@xyflow/react/dist/style.css";
 import "./index.css";
 import App from "./App";
 import { initTheme } from "./lib/theme";
+import { initI18n } from "./i18n";
 
 initTheme();
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+void initI18n().then(() =>
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  ),
 );

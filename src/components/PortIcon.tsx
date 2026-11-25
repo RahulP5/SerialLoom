@@ -1,5 +1,6 @@
 import { Bluetooth, Cable, Cpu, Globe, Plug, Usb } from "lucide-react";
 import type { EndpointIcon } from "./graph";
+import { useT } from "../i18n";
 
 const ICONS = {
   usb: Usb,
@@ -9,15 +10,6 @@ const ICONS = {
   tcp: Globe,
   unknown: Plug,
 } as const;
-
-export const KIND_LABEL: Record<EndpointIcon, string> = {
-  usb: "USB",
-  pci: "Built-in",
-  bluetooth: "Bluetooth",
-  virtual: "Virtual",
-  tcp: "Network",
-  unknown: "Serial",
-};
 
 export const KIND_COLOR: Record<EndpointIcon, string> = {
   usb: "#60a5fa",
@@ -34,11 +26,12 @@ export function PortIcon({ kind, size = 16 }: { kind: EndpointIcon; size?: numbe
 }
 
 export function KindBadge({ kind }: { kind: EndpointIcon }) {
+  const t = useT();
   const color = KIND_COLOR[kind];
   return (
     <span className="chip" style={{ color, background: `${color}1f` }}>
       <PortIcon kind={kind} size={12} />
-      {KIND_LABEL[kind]}
+      {t(`kind.${kind}`)}
     </span>
   );
 }

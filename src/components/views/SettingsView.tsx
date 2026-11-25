@@ -17,15 +17,17 @@ import { api, errorText } from "../../lib/api";
 import { DriverMissing } from "./ListViews";
 import { useTheme, type ThemePref } from "../../lib/theme";
 import { useUpdates } from "../../lib/updates";
+import { LANGUAGES, systemLanguage, tr, useI18n, useT, type LanguagePref, type MessageKey } from "../../i18n";
 
-const THEMES: { id: ThemePref; label: string; icon: typeof Sun }[] = [
-  { id: "system", label: "Same as Windows", icon: Monitor },
-  { id: "light", label: "Light", icon: Sun },
-  { id: "dark", label: "Dark", icon: Moon },
+const THEMES: { id: ThemePref; label: MessageKey; icon: typeof Sun }[] = [
+  { id: "system", label: "theme.system", icon: Monitor },
+  { id: "light", label: "theme.light", icon: Sun },
+  { id: "dark", label: "theme.dark", icon: Moon },
 ];
 
 export function SettingsView() {
   const { settings, driver, saveSettings, busy } = useStore();
+  const t = useT();
   const [draft, setDraft] = useState<AppSettings | undefined>(settings);
   useEffect(() => setDraft(settings), [settings]);
   if (!draft) return null;
@@ -37,25 +39,19 @@ export function SettingsView() {
     <div className="h-full overflow-y-auto px-8 py-7">
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
-          <h1 className="text-xl font-semibold text-ink-0">Settings</h1>
-          <p className="mt-1 text-sm text-ink-300">
-            Appearance, running in the background, updates, administrator permission, automation, and where virtual
-            ports come from.
-          </p>
+          <h1 className="text-xl font-semibold text-ink-0">{t("settings.title")}</h1>
+          <p className="mt-1 text-sm text-ink-300">{t("settings.subtitle")}</p>
         </div>
 
         <Appearance />
 
         <section className="panel p-5">
           <h2 className="flex items-center gap-2 font-semibold text-ink-0">
-            <PanelBottom size={16} className="text-cyan-300" /> Running in the background
+            <PanelBottom size={16} className="text-cyan-300" /> {t("background.title")}
           </h2>
+          <p className="mt-1.5 text-sm text-ink-300">{t("background.text")}</p>
           <p className="mt-1.5 text-sm text-ink-300">
-            Closing the window keeps SerialLoom running in the notification area (the arrow next to the clock), so
-            virtual ports stay open for your programs. Click the SerialLoom icon there to open the window again.
-          </p>
-          <p className="mt-1.5 text-sm text-ink-300">
-            To stop all ports and exit, right-click the icon and choose <b className="text-ink-100">Quit SerialLoom</b>.
+            {tr("background.quit", { quit: <b className="text-ink-100">{t("background.quitItem")}</b> })}
           </p>
           <label className="mt-3 flex items-center gap-2 text-sm text-ink-100">
             <input
@@ -64,7 +60,7 @@ export function SettingsView() {
               onChange={(e) => setDraft({ ...draft, startWithWindows: e.target.checked })}
               className="accent-loom-500"
             />
-            Start SerialLoom in the background when I sign in to Windows
+            {t("background.startWithWindows")}
           </label>
         </section>
 
@@ -75,28 +71,26 @@ export function SettingsView() {
         <Automation draft={draft} setDraft={setDraft} />
 
         <section className="panel p-5">
-          <h2 className="font-semibold text-ink-0">Virtual port driver</h2>
-          <p className="mt-1 text-sm text-ink-300">
-            Choose how SerialLoom creates COM ports. Everything needed is included with SerialLoom.
-          </p>
+          <h2 className="font-semibold text-ink-0">{t("driverSettings.title")}</h2>
+          <p className="mt-1 text-sm text-ink-300">{t("driverSettings.text")}</p>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <DriverCard
               active={draft.driver === "usb"}
               onClick={() => setDriver("usb")}
-              title="Virtual USB serial (recommended)"
-              text="Ports appear as USB serial devices using Windows' own driver. Works on any PC. Ports exist while SerialLoom runs."
+              title={t("driverSettings.usbTitle")}
+              text={t("driverSettings.usbText")}
             />
             <DriverCard
               active={draft.driver === "native"}
               onClick={() => setDriver("native")}
-              title="SerialLoom driver"
-              text="SerialLoom's own port driver. Needs a Microsoft signature to load, so it only works on test-mode PCs for now."
+              title={t("driverSettings.nativeTitle")}
+              text={t("driverSettings.nativeText")}
             />
             <DriverCard
               active={draft.driver === "demo"}
               onClick={() => setDriver("demo")}
-              title="Demo (simulated)"
-              text="Try the interface without installing anything. Ports exist only inside SerialLoom."
+              title={t("driverSettings.demoTitle")}
+              text={t("driverSettings.demoText")}
             />
           </div>
 
@@ -116,7 +110,7 @@ export function SettingsView() {
               )}
               <div className="min-w-0">
                 <div className="font-medium">
-                  {driver.name}: {driver.available ? "ready" : "not installed"}
+                  {t(driver.available ? "driverSettings.ready" : "driverSettings.notInstalled", { name: driver.name })}
                 </div>
                 {driver.location && <div className="truncate font-mono text-xs opacity-80">{driver.location}</div>}
               </div>
@@ -129,10 +123,10 @@ export function SettingsView() {
 
         <div className="flex justify-end gap-2">
           <button className="btn-ghost" disabled={!dirty} onClick={() => setDraft(settings)}>
-            Discard
+            {t("settings.discard")}
           </button>
           <button className="btn-primary" disabled={!dirty || !!busy} onClick={() => saveSettings(draft)}>
-            Save settings
+            {t("settings.save")}
           </button>
         </div>
       </div>
@@ -142,42 +136,68 @@ export function SettingsView() {
 
 function Appearance() {
   const { pref, setPref } = useTheme();
+  const t = useT();
   return (
     <section className="panel p-5">
-      <h2 className="font-semibold text-ink-0">Appearance</h2>
-      <p className="mt-1 text-sm text-ink-300">Applies right away.</p>
+      <h2 className="font-semibold text-ink-0">{t("appearance.title")}</h2>
+      <p className="mt-1 text-sm text-ink-300">{t("appearance.note")}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        {THEMES.map((t) => (
+        {THEMES.map((theme) => (
           <button
-            key={t.id}
-            onClick={() => setPref(t.id)}
-            aria-pressed={pref === t.id}
+            key={theme.id}
+            onClick={() => setPref(theme.id)}
+            aria-pressed={pref === theme.id}
             className={clsx(
               "flex items-center gap-2.5 rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors",
-              pref === t.id ? "border-loom-400 bg-loom-500/10 text-ink-0" : "border-ink-700 text-ink-200 hover:border-ink-500",
+              pref === theme.id ? "border-loom-400 bg-loom-500/10 text-ink-0" : "border-ink-700 text-ink-200 hover:border-ink-500",
             )}
           >
-            <t.icon size={16} className={pref === t.id ? "text-cyan-300" : "text-ink-400"} />
-            {t.label}
+            <theme.icon size={16} className={pref === theme.id ? "text-cyan-300" : "text-ink-400"} />
+            {t(theme.label)}
           </button>
         ))}
       </div>
+      <LanguagePicker />
     </section>
+  );
+}
+
+function LanguagePicker() {
+  const { pref, setPref } = useI18n();
+  const t = useT();
+  const system = LANGUAGES.find((l) => l.code === systemLanguage())?.name ?? "English";
+  return (
+    <div className="mt-5">
+      <label className="label" htmlFor="language">
+        {t("language.label")}
+      </label>
+      <select
+        id="language"
+        className="input sm:w-72"
+        value={pref}
+        onChange={(e) => setPref(e.target.value as LanguagePref)}
+      >
+        <option value="system">{t("language.system", { language: system })}</option>
+        {LANGUAGES.map((l) => (
+          <option key={l.code} value={l.code} lang={l.code}>
+            {l.name}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1.5 text-xs text-ink-400">{t("language.note")}</p>
+    </div>
   );
 }
 
 function Updates() {
   const { enabled, setEnabled } = useUpdates();
+  const t = useT();
   return (
     <section className="panel p-5">
       <h2 className="flex items-center gap-2 font-semibold text-ink-0">
-        <CircleArrowUp size={16} className="text-cyan-300" /> Updates
+        <CircleArrowUp size={16} className="text-cyan-300" /> {t("updates.title")}
       </h2>
-      <p className="mt-1.5 text-sm text-ink-300">
-        When a new version is out, a notice in the bottom-left corner links to the download page. To find out,
-        SerialLoom asks GitHub for its latest release when it starts and once a day. The request contains no personal
-        data, and nothing is installed without you.
-      </p>
+      <p className="mt-1.5 text-sm text-ink-300">{t("updates.text")}</p>
       <label className="mt-3 flex items-center gap-2 text-sm text-ink-100">
         <input
           type="checkbox"
@@ -185,7 +205,7 @@ function Updates() {
           onChange={(e) => setEnabled(e.target.checked)}
           className="accent-loom-500"
         />
-        Check for new versions
+        {t("updates.check")}
       </label>
     </section>
   );
@@ -211,13 +231,14 @@ function DriverCard({ active, onClick, title, text }: { active: boolean; onClick
 
 function AdminPermission() {
   const { helper, refreshHelper, run, busy } = useStore();
+  const t = useT();
   if (!helper?.supported) return null;
 
   const change = async (install: boolean) => {
     await run(
-      install ? "Installing SerialLoom Helper (Windows asks for administrator permission)" : "Removing SerialLoom Helper (Windows asks for administrator permission)",
+      t("common.adminNote", { action: t(install ? "admin.installing" : "admin.removing") }),
       () => (install ? api.installHelper() : api.removeHelper()),
-      install ? "SerialLoom Helper installed" : "SerialLoom Helper removed",
+      t(install ? "admin.installedToast" : "admin.removedToast"),
     );
     await refreshHelper();
   };
@@ -225,13 +246,10 @@ function AdminPermission() {
   return (
     <section className="panel p-5">
       <h2 className="flex items-center gap-2 font-semibold text-ink-0">
-        <ShieldCheck size={16} className="text-cyan-300" /> Administrator permission
+        <ShieldCheck size={16} className="text-cyan-300" /> {t("admin.title")}
       </h2>
       <p className="mt-1.5 text-sm text-ink-300">
-        Creating, renumbering and removing virtual ports changes Windows device settings, which needs administrator
-        rights. <b className="text-ink-100">SerialLoom Helper</b> is a small Windows service, installed with SerialLoom,
-        that makes these changes so Windows does not ask every time. It can only create, renumber and remove
-        SerialLoom&apos;s own virtual ports, serves only SerialLoom, and stops itself when it is not needed.
+        {tr("admin.text", { helper: <b className="text-ink-100">SerialLoom Helper</b> })}
       </p>
       <div
         className={clsx(
@@ -244,20 +262,21 @@ function AdminPermission() {
         {helper.installed ? <CircleCheck size={16} className="shrink-0" /> : <CircleAlert size={16} className="shrink-0" />}
         <span className="min-w-0 flex-1">
           {helper.installed
-            ? `Installed${helper.running ? " and running" : ""}. Port changes need no permission prompt.`
-            : "Not installed. Windows asks for administrator permission for each port change."}
+            ? t(helper.running ? "admin.installedRunning" : "admin.installed")
+            : t("admin.notInstalled")}
         </span>
         <button className="btn-ghost shrink-0" disabled={!!busy} onClick={() => change(!helper.installed)}>
-          {helper.installed ? "Remove" : "Install"}
+          {helper.installed ? t("common.remove") : t("common.install")}
         </button>
       </div>
-      <p className="mt-2 text-xs text-ink-400">Installing or removing the helper asks for administrator permission once.</p>
+      <p className="mt-2 text-xs text-ink-400">{t("admin.once")}</p>
     </section>
   );
 }
 
 function Automation({ draft, setDraft }: { draft: AppSettings; setDraft: (s: AppSettings) => void }) {
   const settings = useStore((s) => s.settings);
+  const t = useT();
   const [info, setInfo] = useState<AutomationInfo>();
   useEffect(() => {
     api
@@ -270,12 +289,10 @@ function Automation({ draft, setDraft }: { draft: AppSettings; setDraft: (s: App
   return (
     <section className="panel p-5">
       <h2 className="flex items-center gap-2 font-semibold text-ink-0">
-        <SquareTerminal size={16} className="text-cyan-300" /> Automation
+        <SquareTerminal size={16} className="text-cyan-300" /> {t("automation.title")}
       </h2>
       <p className="mt-1.5 text-sm text-ink-300">
-        Lets test scripts and other tools create virtual port pairs and start, stop or delete connections while
-        SerialLoom runs, with <span className="font-mono text-ink-100">serialloom-cli</span> or the local API. Only
-        programs running under your Windows account can connect, and nothing is reachable from the network.
+        {tr("automation.text", { cli: <span className="font-mono text-ink-100">serialloom-cli</span> })}
       </p>
       <label className="mt-3 flex items-center gap-2 text-sm text-ink-100">
         <input
@@ -284,7 +301,7 @@ function Automation({ draft, setDraft }: { draft: AppSettings; setDraft: (s: App
           onChange={(e) => setDraft({ ...draft, automation: e.target.checked })}
           className="accent-loom-500"
         />
-        Allow other programs to control SerialLoom
+        {t("automation.allow")}
       </label>
       {info?.error && (
         <div className="mt-3 flex gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2.5 text-sm text-rose-100">
@@ -294,10 +311,10 @@ function Automation({ draft, setDraft }: { draft: AppSettings; setDraft: (s: App
       )}
       {info?.running && (
         <div className="mt-3 space-y-1.5 text-xs text-ink-300">
-          <div>Example: create a virtual null-modem pair and print its ports</div>
+          <div>{t("automation.example")}</div>
           <pre className="overflow-x-auto rounded-lg bg-ink-900 px-3 py-2 font-mono text-ink-100">{`${cli} pair COM9 COM10`}</pre>
           <div className="truncate">
-            Pipe: <span className="font-mono">{info.pipe}</span>
+            {t("automation.pipe")} <span className="font-mono">{info.pipe}</span>
           </div>
         </div>
       )}

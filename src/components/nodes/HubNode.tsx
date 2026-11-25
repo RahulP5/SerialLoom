@@ -3,7 +3,8 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { ArrowLeftRight, Merge, Play, RadioTower, Split, Square } from "lucide-react";
 import clsx from "clsx";
 import type { HubNode as HubNodeType } from "../graph";
-import { HUB_META, formatRate } from "../../lib/format";
+import { formatRate, hubLabel } from "../../lib/format";
+import { useT } from "../../i18n";
 import { api } from "../../lib/api";
 import { useStore } from "../../store";
 import type { HubKind } from "../../lib/types";
@@ -19,11 +20,12 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
   const { spec, status } = data.hub;
   const Icon = HUB_ICON[spec.kind];
   const run = useStore((s) => s.run);
+  const t = useT();
 
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (status.running) run("Stopping hub", () => api.stopHub(spec.id));
-    else run("Starting hub", () => api.startHub(spec.id));
+    if (status.running) run(t("node.stopping"), () => api.stopHub(spec.id));
+    else run(t("node.starting"), () => api.startHub(spec.id));
   };
 
   return (
@@ -45,8 +47,8 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-ink-0">{spec.name}</div>
-          <div className="text-[11px]" style={{ color: data.color }}>
-            {HUB_META[spec.kind].label} · {spec.members.length + 1} ends
+          <div className="truncate text-[11px]" style={{ color: data.color }}>
+            {hubLabel(spec.kind)} · {t("node.ends", { count: spec.members.length + 1 })}
           </div>
         </div>
         <button
@@ -57,14 +59,14 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
               : "border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/15",
           )}
           onClick={toggle}
-          title={status.running ? "Stop" : "Start"}
+          title={status.running ? t("common.stop") : t("common.start")}
         >
           {status.running ? <Square size={12} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
         </button>
       </div>
       <div className="mt-2 flex items-center justify-between text-[10.5px] text-ink-300">
         <span className={status.running ? "text-emerald-300" : "text-ink-400"}>
-          {status.running ? "● running" : "○ stopped"}
+          {status.running ? `● ${t("common.running")}` : `○ ${t("common.stopped")}`}
         </span>
         <span className="font-mono">{formatRate(data.totalRate)}</span>
       </div>

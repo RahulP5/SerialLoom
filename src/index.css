@@ -71,6 +71,21 @@ body,
   height: 100%;
 }
 
+/* Segoe UI has no Chinese, Japanese or Korean characters. Name Windows' own
+   UI font for each, so each language gets its own forms of shared characters. */
+:root:lang(zh-CN) {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+:root:lang(ja) {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif;
+}
+:root:lang(ko) {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  /* Korean breaks lines between words, not between syllables. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
 body {
   margin: 0;
   background: var(--color-ink-900);

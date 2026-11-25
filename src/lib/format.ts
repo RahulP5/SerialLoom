@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { EndpointRequest, EndpointSpec, EndpointStatus, HubEndpoint, HubKind, SerialSettings } from "./types";
 
 export function formatBytes(n: number): string {
@@ -31,7 +32,7 @@ export function specTitle(s: EndpointSpec | EndpointRequest): string {
     case "tcpClient":
       return s.address;
     case "newVirtual":
-      return s.name === "COM#" ? "COM (auto)" : s.name;
+      return s.name === "COM#" ? t("endpoint.autoCom") : s.name;
   }
 }
 
@@ -56,41 +57,35 @@ export function endpointSubtitle(e: HubEndpoint, status?: EndpointStatus): strin
     case "serial":
       return serialSummary(s.settings);
     case "virtual":
-      if (!status?.peerOpen) return "waiting for an app";
-      return status.line ? `app · ${status.line.baudRate} ${status.line.framing}` : "app connected";
+      if (!status?.peerOpen) return t("endpoint.waiting");
+      return status.line
+        ? t("endpoint.app", { baud: status.line.baudRate, framing: status.line.framing })
+        : t("endpoint.appConnected");
     case "tcpServer":
-      return `listen ${s.bind}`;
+      return t("endpoint.listen", { bind: s.bind });
     case "tcpClient":
-      return "TCP client";
+      return t("endpoint.tcpClient");
   }
 }
 
-export const HUB_META: Record<HubKind, { label: string; verb: string; color: string; describe: string }> = {
-  split: {
-    label: "Split",
-    verb: "Split a port",
-    color: "#22d3ee",
-    describe: "Share one port with several applications. Each one gets its own virtual COM port.",
-  },
-  join: {
-    label: "Join",
-    verb: "Join ports",
-    color: "#a78bfa",
-    describe: "Merge several ports into one virtual COM port. Data from all of them arrives in one place.",
-  },
-  bridge: {
-    label: "Bridge",
-    verb: "Bridge two endpoints",
-    color: "#34d399",
-    describe: "Wire two endpoints together, e.g. a COM port and a TCP socket, or two COM ports.",
-  },
-  bus: {
-    label: "Bus",
-    verb: "Shared bus",
-    color: "#fbbf24",
-    describe: "Every endpoint hears every other one, like an RS-485 multidrop line.",
-  },
+export const HUB_KINDS: HubKind[] = ["split", "join", "bridge", "bus"];
+
+export const HUB_COLOR: Record<HubKind, string> = {
+  split: "#22d3ee",
+  join: "#a78bfa",
+  bridge: "#34d399",
+  bus: "#fbbf24",
 };
+
+/** The connection type's name, e.g. "Split". */
+export function hubLabel(kind: HubKind): string {
+  return t(`hub.${kind}.label`);
+}
+
+/** One sentence on what the connection type does. */
+export function hubDescription(kind: HubKind): string {
+  return t(`hub.${kind}.describe`);
+}
 
 export function hex(bytes: number[]): string {
   return bytes.map((b) => b.toString(16).padStart(2, "0")).join(" ");

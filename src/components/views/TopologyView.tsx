@@ -20,7 +20,8 @@ import { HubNode } from "../nodes/HubNode";
 import { TrafficEdge } from "../nodes/TrafficEdge";
 import { KindBadge } from "../PortIcon";
 import { DEFAULT_SERIAL, type HubKind, type PortInfo } from "../../lib/types";
-import { HUB_META } from "../../lib/format";
+import { HUB_COLOR, HUB_KINDS, hubDescription, hubLabel } from "../../lib/format";
+import { useI18n, useT } from "../../i18n";
 
 const nodeTypes = { endpoint: EndpointNode, hub: HubNode };
 const edgeTypes = { traffic: TrafficEdge };
@@ -59,12 +60,15 @@ export function TopologyView() {
 function Canvas() {
   const { hubs, ports, rates, selection, select, openDialog } = useStore();
   const theme = useTheme((s) => s.resolved);
+  const lang = useI18n((s) => s.lang);
+  const t = useT();
   const { fitView } = useReactFlow();
   const saved = useRef<Record<string, XY>>(loadPositions());
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [dropHub, setDropHub] = useState<string | null>(null);
 
-  const graph = useMemo(() => buildGraph(hubs, ports, rates), [hubs, ports, rates]);
+  // Node subtitles are text, so the graph is rebuilt when the language changes.
+  const graph = useMemo(() => buildGraph(hubs, ports, rates), [hubs, ports, rates, lang]);
   const structureKey = graph.nodes.map((n) => n.id).join("|");
 
   // Merge fresh data into existing nodes so drag positions and measurements survive status updates.
@@ -166,16 +170,16 @@ function Canvas() {
       </ReactFlow>
 
       <div className="absolute top-3 left-3 flex flex-wrap gap-2">
-        {(["split", "join", "bridge", "bus"] as HubKind[]).map((k) => (
+        {HUB_KINDS.map((k) => (
           <ToolbarButton key={k} kind={k} />
         ))}
         <button className="btn-outline bg-ink-850/90" onClick={() => openDialog({ type: "pair" })}>
-          <Cable size={15} /> Virtual pair
+          <Cable size={15} /> {t("topology.virtualPair")}
         </button>
       </div>
       <div className="absolute top-3 right-3">
-        <button className="btn-outline bg-ink-850/90" onClick={resetLayout} title="Reset node positions">
-          <LayoutGrid size={15} /> Auto-layout
+        <button className="btn-outline bg-ink-850/90" onClick={resetLayout} title={t("topology.autoLayoutTip")}>
+          <LayoutGrid size={15} /> {t("topology.autoLayout")}
         </button>
       </div>
 
@@ -189,34 +193,33 @@ const KIND_ICON = { split: Split, join: Merge, bridge: ArrowLeftRight, bus: Radi
 function ToolbarButton({ kind }: { kind: HubKind }) {
   const openDialog = useStore((s) => s.openDialog);
   const Icon = KIND_ICON[kind];
-  const meta = HUB_META[kind];
+  useT();
   return (
     <button
       className="btn-outline bg-ink-850/90"
       onClick={() => openDialog({ type: "hub", preset: { kind } })}
-      title={meta.describe}
+      title={hubDescription(kind)}
     >
-      <Icon size={15} style={{ color: meta.color }} /> {meta.label}
+      <Icon size={15} style={{ color: HUB_COLOR[kind] }} /> {hubLabel(kind)}
     </button>
   );
 }
 
 function EmptyState() {
   const openDialog = useStore((s) => s.openDialog);
+  const t = useT();
   return (
     <div className="pointer-events-none absolute inset-0 grid place-items-center">
       <div className="panel pointer-events-auto max-w-md p-6 text-center">
         <img src="/logo.svg" alt="" className="mx-auto mb-3 h-14 w-14" />
-        <h2 className="text-lg font-semibold text-ink-0">Weave your first connection</h2>
-        <p className="mt-1.5 text-sm text-ink-300">
-          Drag a port from the left onto the canvas to split it, or start from one of the templates.
-        </p>
+        <h2 className="text-lg font-semibold text-ink-0">{t("topology.emptyTitle")}</h2>
+        <p className="mt-1.5 text-sm text-ink-300">{t("topology.emptyText")}</p>
         <div className="mt-4 flex justify-center gap-2">
           <button className="btn-primary" onClick={() => openDialog({ type: "hub", preset: { kind: "split" } })}>
-            <Split size={15} /> Split a port
+            <Split size={15} /> {t("topology.splitPort")}
           </button>
           <button className="btn-outline" onClick={() => openDialog({ type: "pair" })}>
-            <Plus size={15} /> Virtual pair
+            <Plus size={15} /> {t("topology.virtualPair")}
           </button>
         </div>
       </div>
@@ -226,19 +229,18 @@ function EmptyState() {
 
 function PortPalette() {
   const { ports, hubs } = useStore();
+  const t = useT();
   const visible = ports;
   const hubName = (id: string | null) => hubs.find((h) => h.spec.id === id)?.spec.name;
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-ink-700/70 bg-ink-900/60">
       <div className="px-4 pt-4 pb-2">
-        <h3 className="text-xs font-semibold tracking-wider text-ink-300 uppercase">Ports</h3>
-        <p className="mt-1 text-[11px] leading-snug text-ink-400">
-          Drag onto the canvas to split, or onto a hub to add it.
-        </p>
+        <h3 className="text-xs font-semibold tracking-wider text-ink-300 uppercase">{t("nav.ports")}</h3>
+        <p className="mt-1 text-[11px] leading-snug text-ink-400">{t("topology.paletteHint")}</p>
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-3">
-        {visible.length === 0 && <p className="px-1 py-6 text-center text-xs text-ink-400">No serial ports found.</p>}
+        {visible.length === 0 && <p className="px-1 py-6 text-center text-xs text-ink-400">{t("common.noSerialPorts")}</p>}
         {visible.map((p) => (
           <PaletteItem key={p.name} port={p} busyBy={hubName(p.inUseBy)} />
         ))}
@@ -248,6 +250,7 @@ function PortPalette() {
 }
 
 function PaletteItem({ port, busyBy }: { port: PortInfo; busyBy?: string }) {
+  const t = useT();
   const draggable = !port.inUseBy;
   return (
     <div
@@ -271,7 +274,7 @@ function PaletteItem({ port, busyBy }: { port: PortInfo; busyBy?: string }) {
           <KindBadge kind={port.kind} />
         </div>
         <div className="truncate text-[11px] text-ink-400">
-          {busyBy ? `in use · ${busyBy}` : (port.description ?? "Serial port")}
+          {busyBy ? t("topology.inUse", { hub: busyBy }) : (port.description ?? t("topology.serialPort"))}
         </div>
       </div>
     </div>

@@ -2,10 +2,12 @@ import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
 import type { EndpointNode as EndpointNodeType } from "../graph";
-import { PortIcon, KIND_COLOR, KIND_LABEL } from "../PortIcon";
+import { PortIcon, KIND_COLOR } from "../PortIcon";
 import { formatRate } from "../../lib/format";
+import { useT } from "../../i18n";
 
 function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
+  const t = useT();
   const kindColor = KIND_COLOR[data.icon];
   const error = data.status?.lastError;
   const warning = data.status?.warning;
@@ -34,25 +36,25 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
           <div className="flex items-center gap-1.5">
             <span className="truncate font-mono text-[15px] font-semibold text-ink-0">{data.title}</span>
             {data.role === "master" && (
-              <span className="chip bg-ink-700 text-ink-200" title="Hub master">
-                M
+              <span className="chip bg-ink-700 text-ink-200" title={t("node.master")}>
+                {t("node.masterShort")}
               </span>
             )}
           </div>
           <div className="truncate text-[11px] text-ink-300">
-            {KIND_LABEL[data.icon]} · {data.subtitle}
+            {t(`kind.${data.icon}`)} · {data.subtitle}
           </div>
         </div>
         <span
           className={clsx("h-2.5 w-2.5 shrink-0 rounded-full", state === "live" && busy && "pulse")}
           style={{ background: dot, ["--ring" as string]: `${dot}88` }}
-          title={state}
+          title={t(`node.state.${state}`)}
         />
       </div>
       {data.running && (
         <div className="mt-2 flex justify-between border-t border-ink-700/70 pt-1.5 font-mono text-[10.5px] text-ink-300">
-          <span title="Received from this endpoint">▲ {formatRate(data.rate?.rx ?? 0)}</span>
-          <span title="Sent to this endpoint">▼ {formatRate(data.rate?.tx ?? 0)}</span>
+          <span title={t("node.received")}>▲ {formatRate(data.rate?.rx ?? 0)}</span>
+          <span title={t("node.sent")}>▼ {formatRate(data.rate?.tx ?? 0)}</span>
         </div>
       )}
       {error && data.running && (

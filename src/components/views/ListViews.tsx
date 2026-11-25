@@ -4,6 +4,8 @@ import { useStore } from "../../store";
 import { api } from "../../lib/api";
 import { DEFAULT_SERIAL, type PortInfo } from "../../lib/types";
 import { KindBadge } from "../PortIcon";
+import { hubLabel } from "../../lib/format";
+import { useT } from "../../i18n";
 
 function Page({
   title,
@@ -40,6 +42,7 @@ function endpointFor(p: PortInfo) {
 
 export function PortsView() {
   const { ports, hubs, openDialog, setView } = useStore();
+  const t = useT();
   const hubName = (id: string | null) => hubs.find((h) => h.spec.id === id)?.spec.name;
 
   const start = (kind: "split" | "bridge", p: PortInfo) => {
@@ -48,15 +51,15 @@ export function PortsView() {
   };
 
   return (
-    <Page title="Serial ports" subtitle="Every COM port Windows reports, including SerialLoom's virtual ports.">
+    <Page title={t("ports.title")} subtitle={t("ports.subtitle")}>
       <div className="panel overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-ink-800/60 text-left text-xs tracking-wide text-ink-300 uppercase">
             <tr>
-              <th className="px-4 py-2.5 font-medium">Port</th>
-              <th className="px-4 py-2.5 font-medium">Type</th>
-              <th className="px-4 py-2.5 font-medium">Description</th>
-              <th className="px-4 py-2.5 font-medium">Status</th>
+              <th className="px-4 py-2.5 font-medium">{t("ports.colPort")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("ports.colType")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("ports.colDescription")}</th>
+              <th className="px-4 py-2.5 font-medium">{t("ports.colStatus")}</th>
               <th className="px-4 py-2.5" />
             </tr>
           </thead>
@@ -64,7 +67,7 @@ export function PortsView() {
             {ports.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-ink-400">
-                  No serial ports found.
+                  {t("common.noSerialPorts")}
                 </td>
               </tr>
             )}
@@ -84,21 +87,21 @@ export function PortsView() {
                 </td>
                 <td className="px-4 py-2.5 text-xs">
                   {p.inUseBy ? (
-                    <span className="text-amber-300">In use · {hubName(p.inUseBy)}</span>
+                    <span className="text-amber-300">{t("ports.inUse", { hub: hubName(p.inUseBy) ?? "" })}</span>
                   ) : !p.present ? (
-                    <span className="text-ink-400">Not started</span>
+                    <span className="text-ink-400">{t("ports.notStarted")}</span>
                   ) : (
-                    <span className="text-emerald-300">Available</span>
+                    <span className="text-emerald-300">{t("ports.available")}</span>
                   )}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
                   {!p.inUseBy && (
                     <>
                       <button className="btn-ghost px-2 py-1 text-xs" onClick={() => start("split", p)}>
-                        <Split size={13} /> Split
+                        <Split size={13} /> {hubLabel("split")}
                       </button>
                       <button className="btn-ghost px-2 py-1 text-xs" onClick={() => start("bridge", p)}>
-                        <ArrowLeftRight size={13} /> Bridge
+                        <ArrowLeftRight size={13} /> {hubLabel("bridge")}
                       </button>
                     </>
                   )}
@@ -114,6 +117,7 @@ export function PortsView() {
 
 export function VirtualPortsView() {
   const { virtualPorts, hubs, run, openDialog, driver } = useStore();
+  const t = useT();
   const owner = (name: string) =>
     hubs.find((h) => [h.spec.master, ...h.spec.members].some((e) => e.spec.kind === "virtual" && e.spec.port === name))
       ?.spec.name;
@@ -121,18 +125,18 @@ export function VirtualPortsView() {
 
   return (
     <Page
-      title="Virtual ports"
-      subtitle={`COM ports created by ${driver?.name ?? "the SerialLoom driver"}. Programs see them as ordinary serial ports.`}
+      title={t("virtual.title")}
+      subtitle={t("virtual.subtitle", { driver: driver?.name ?? t("virtual.defaultDriver") })}
       actions={
         <div className="flex gap-2">
-          <button className="btn-ghost" onClick={() => openDialog({ type: "diagnostics" })} title="Collect a troubleshooting report">
-            <Stethoscope size={15} /> Diagnostics
+          <button className="btn-ghost" onClick={() => openDialog({ type: "diagnostics" })} title={t("virtual.diagnosticsTip")}>
+            <Stethoscope size={15} /> {t("virtual.diagnostics")}
           </button>
           <button className="btn-outline" onClick={() => openDialog({ type: "pair" })} disabled={!ready}>
-            <Cable size={15} /> New pair
+            <Cable size={15} /> {t("virtual.newPair")}
           </button>
           <button className="btn-primary" onClick={() => openDialog({ type: "virtualPort" })} disabled={!ready}>
-            <Plus size={15} /> New port
+            <Plus size={15} /> {t("virtual.newPort")}
           </button>
         </div>
       }
@@ -141,7 +145,7 @@ export function VirtualPortsView() {
       {ready && virtualPorts.length === 0 ? (
         <div className="panel grid place-items-center px-6 py-14 text-center">
           <Cable size={28} className="text-ink-500" />
-          <p className="mt-3 text-sm text-ink-300">No virtual ports yet.</p>
+          <p className="mt-3 text-sm text-ink-300">{t("virtual.none")}</p>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -160,17 +164,17 @@ export function VirtualPortsView() {
                           : "chip bg-ink-700 text-ink-300"
                     }
                   >
-                    {p.state}
+                    {t(`virtual.state.${p.state}`)}
                   </span>
                   {!used && (
                     <button
                       className="ml-auto text-ink-500 hover:text-rose-300"
-                      title="Remove port"
+                      title={t("virtual.removeTip")}
                       onClick={() =>
                         run(
-                          useStore.getState().adminNote("Removing port"),
+                          useStore.getState().adminNote(t("virtual.removing")),
                           () => api.removeVirtualPort(p.name),
-                          `${p.name} removed`,
+                          t("virtual.removed", { port: p.name }),
                         )
                       }
                     >
@@ -183,7 +187,7 @@ export function VirtualPortsView() {
                 {p.driverReport && p.state !== "ready" && (
                   <p className="selectable mt-1.5 font-mono text-[10.5px] break-words text-ink-400">{p.driverReport}</p>
                 )}
-                <p className="mt-2 text-xs text-ink-300">{used ? `Used by "${used}"` : "Not connected to anything"}</p>
+                <p className="mt-2 text-xs text-ink-300">{used ? t("virtual.usedBy", { hub: used }) : t("virtual.unused")}</p>
                 <ChangeNumber port={p.name} />
               </div>
             );
@@ -196,22 +200,27 @@ export function VirtualPortsView() {
 
 export function DriverMissing() {
   const { driver, run } = useStore();
+  const t = useT();
   if (!driver || driver.available) return null;
   return (
     <div className="panel mb-4 flex items-start gap-3 border-amber-500/40 p-4">
       <CircleAlert size={18} className="mt-0.5 shrink-0 text-amber-300" />
       <div className="flex-1 text-sm">
-        <p className="font-medium text-amber-100">The SerialLoom driver is not installed</p>
+        <p className="font-medium text-amber-100">{t("driver.notInstalledTitle")}</p>
         <p className="mt-1 text-ink-300">{driver.message}</p>
       </div>
       {driver.installable && (
         <button
           className="btn-primary shrink-0"
           onClick={() =>
-            run("Installing driver (Windows asks for administrator permission)", () => api.installDriver(), "Driver installed")
+            run(
+              t("common.adminNote", { action: t("driver.installing") }),
+              () => api.installDriver(),
+              t("driver.installed"),
+            )
           }
         >
-          <Download size={15} /> Install driver
+          <Download size={15} /> {t("driver.install")}
         </button>
       )}
     </div>
@@ -221,6 +230,7 @@ export function DriverMissing() {
 /** Gives a virtual port another COM number, like Device Manager's Advanced port settings. */
 function ChangeNumber({ port }: { port: string }) {
   const { run } = useStore();
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(port);
 
@@ -233,7 +243,7 @@ function ChangeNumber({ port }: { port: string }) {
           setEditing(true);
         }}
       >
-        <Hash size={13} /> Change number
+        <Hash size={13} /> {t("virtual.changeNumber")}
       </button>
     );
   }
@@ -242,9 +252,9 @@ function ChangeNumber({ port }: { port: string }) {
     const target = value.trim().toUpperCase();
     if (!target || target === port) return setEditing(false);
     const ok = await run(
-      useStore.getState().adminNote("Changing COM number"),
+      useStore.getState().adminNote(t("virtual.changing")),
       () => api.renameVirtualPort(port, target),
-      `${port} is now ${target}`,
+      t("virtual.renamed", { port, target }),
     );
     if (ok) setEditing(false);
   };
@@ -264,10 +274,10 @@ function ChangeNumber({ port }: { port: string }) {
         placeholder="COM20"
       />
       <button className="btn-primary px-2.5 py-1 text-xs" onClick={save}>
-        Save
+        {t("common.save")}
       </button>
       <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setEditing(false)}>
-        Cancel
+        {t("common.cancel")}
       </button>
     </div>
   );

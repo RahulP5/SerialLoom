@@ -129,6 +129,7 @@ pub fn run() {
             commands::helper_status,
             commands::install_helper,
             commands::remove_helper,
+            tray::set_tray_text,
         ])
         .build(tauri::generate_context!())
         .expect("error while building SerialLoom");

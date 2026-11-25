@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { useT } from "../../i18n";
 
 export function Modal({
   title,
@@ -18,6 +19,7 @@ export function Modal({
   footer?: ReactNode;
   width?: number;
 }) {
+  const t = useT();
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
@@ -43,7 +45,7 @@ export function Modal({
             <h2 className="text-base font-semibold text-ink-0">{title}</h2>
             {subtitle && <p className="mt-0.5 text-sm text-ink-300">{subtitle}</p>}
           </div>
-          <button className="btn-ghost -mr-2 px-2" onClick={onClose} aria-label="Close">
+          <button className="btn-ghost -mr-2 px-2" onClick={onClose} aria-label={t("common.close")}>
             <X size={16} />
           </button>
         </header>

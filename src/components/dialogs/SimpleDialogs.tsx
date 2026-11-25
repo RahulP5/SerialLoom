@@ -5,8 +5,9 @@ import { EndpointEditor, defaultFor } from "./EndpointEditor";
 import { useStore } from "../../store";
 import { api, errorText } from "../../lib/api";
 import type { EndpointRequest } from "../../lib/types";
+import { t, tr, useT } from "../../i18n";
 
-const adminNote = () => useStore.getState().adminNote("Creating ports");
+const adminNote = () => useStore.getState().adminNote(t("dialog.creatingPorts"));
 
 /** Real (non-virtual) port currently using this COM name, if any. */
 function useTakenBy(name: string) {
@@ -18,6 +19,7 @@ function useTakenBy(name: string) {
 
 function NameInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   const taken = useTakenBy(value);
+  const t = useT();
   return (
     <div className="flex-1">
       <label className="label">{label}</label>
@@ -29,7 +31,9 @@ function NameInput({ label, value, onChange }: { label: string; value: string; o
       />
       {taken && (
         <p className="mt-1 text-[11px] text-rose-300">
-          {taken.name} belongs to real hardware{taken.description ? ` (${taken.description})` : ""}. Pick another number.
+          {taken.description
+            ? t("dialog.takenDescribed", { port: taken.name, description: taken.description })
+            : t("dialog.taken", { port: taken.name })}
         </p>
       )}
     </div>
@@ -47,13 +51,14 @@ function Icon() {
 /** Two new virtual ports bridged together: a virtual null-modem cable. */
 export function PairDialog({ onClose }: { onClose: () => void }) {
   const { run, busy, select } = useStore();
+  const t = useT();
   const [a, setA] = useState("COM#");
   const [b, setB] = useState("COM#");
 
   const submit = async () => {
     const hub = await run(adminNote(), () =>
       api.createHub({
-        name: "Virtual null-modem",
+        name: t("pair.defaultName"),
         kind: "bridge",
         master: { kind: "newVirtual", name: a.trim() },
         members: [{ kind: "newVirtual", name: b.trim() }],
@@ -64,7 +69,7 @@ export function PairDialog({ onClose }: { onClose: () => void }) {
     if (hub) {
       const [pa, pb] = [hub.spec.master, hub.spec.members[0]].map((e) => ("port" in e.spec ? e.spec.port : "?"));
       await api.updateHub(hub.spec.id, `${pa} ⇄ ${pb}`);
-      useStore.getState().toast("success", `Created ${pa} ⇄ ${pb}`);
+      useStore.getState().toast("success", t("pair.created", { a: pa, b: pb }));
       const wanted = [a.trim(), b.trim()];
       const got = [pa, pb];
       const differs = wanted.filter((w, i) => w !== "COM#" && w !== got[i]);
@@ -73,7 +78,12 @@ export function PairDialog({ onClose }: { onClose: () => void }) {
           .getState()
           .toast(
             "info",
-            `Windows kept ${got.join(" / ")} instead of ${wanted.join(" / ")}. Use "Change number" under Virtual ports to try again.`,
+            t("pair.kept", {
+              got: got.join(" / "),
+              wanted: wanted.join(" / "),
+              action: t("virtual.changeNumber"),
+              page: t("nav.virtual"),
+            }),
           );
       }
       await useStore.getState().refresh();
@@ -84,30 +94,31 @@ export function PairDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="New virtual port pair"
-      subtitle="Two COM ports joined like a null-modem cable. What one program writes to the first, another reads from the second."
+      title={t("pair.title")}
+      subtitle={t("pair.subtitle")}
       onClose={onClose}
       icon={<Icon />}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button className="btn-primary" onClick={submit} disabled={!!busy}>
-            {busy ? "Working…" : "Create pair"}
+            {busy ? t("common.working") : t("pair.create")}
           </button>
         </>
       }
     >
       <div className="flex items-end gap-3">
-        <NameInput label="Port A" value={a} onChange={setA} />
+        <NameInput label={t("pair.portA")} value={a} onChange={setA} />
         <div className="pb-2 text-ink-400">⇄</div>
-        <NameInput label="Port B" value={b} onChange={setB} />
+        <NameInput label={t("pair.portB")} value={b} onChange={setB} />
       </div>
       <p className="mt-3 text-xs text-ink-400">
-        Type a name such as <code className="font-mono text-ink-200">COM20</code>, or use{" "}
-        <code className="font-mono text-ink-200">COM#</code> for the next free number. SerialLoom carries the data
-        between the two ports while it runs.
+        {tr("pair.hint", {
+          example: <code className="font-mono text-ink-200">COM20</code>,
+          auto: <code className="font-mono text-ink-200">COM#</code>,
+        })}
       </p>
     </Modal>
   );
@@ -116,34 +127,35 @@ export function PairDialog({ onClose }: { onClose: () => void }) {
 /** One standalone virtual port, to wire up later. */
 export function VirtualPortDialog({ onClose }: { onClose: () => void }) {
   const { run, busy } = useStore();
+  const t = useT();
   const [name, setName] = useState("COM#");
 
   const submit = async () => {
     const created = await run(adminNote(), () => api.createVirtualPorts([name.trim()]));
     if (created) {
-      useStore.getState().toast("success", `Created ${created.map((p) => p.name).join(", ")}`);
+      useStore.getState().toast("success", t("vport.created", { ports: created.map((p) => p.name).join(", ") }));
       onClose();
     }
   };
 
   return (
     <Modal
-      title="New virtual COM port"
-      subtitle="The port appears in Windows right away. Connect it to something on the canvas to make it carry data."
+      title={t("vport.title")}
+      subtitle={t("vport.subtitle")}
       onClose={onClose}
       icon={<Icon />}
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button className="btn-primary" onClick={submit} disabled={!!busy}>
-            {busy ? "Working…" : "Create port"}
+            {busy ? t("common.working") : t("vport.create")}
           </button>
         </>
       }
     >
-      <NameInput label="Port name" value={name} onChange={setName} />
+      <NameInput label={t("vport.name")} value={name} onChange={setName} />
     </Modal>
   );
 }
@@ -158,20 +170,21 @@ export function AddMemberDialog({
   onClose: () => void;
 }) {
   const { run, busy, hubs } = useStore();
+  const t = useT();
   const hub = hubs.find((h) => h.spec.id === hubId);
   const [value, setValue] = useState<EndpointRequest>(preset ?? defaultFor("newVirtual"));
   if (!hub) return null;
 
   const submit = async () => {
-    const label = value.kind === "newVirtual" ? adminNote() : "Adding endpoint";
-    const ok = await run(label, () => api.addMember(hubId, value), `Added to "${hub.spec.name}"`);
+    const label = value.kind === "newVirtual" ? adminNote() : t("addMember.adding");
+    const ok = await run(label, () => api.addMember(hubId, value), t("addMember.added", { hub: hub.spec.name }));
     if (ok) onClose();
   };
 
   return (
     <Modal
-      title={`Add to "${hub.spec.name}"`}
-      subtitle={hub.status.running ? "The hub restarts briefly to pick up the new endpoint." : undefined}
+      title={t("addMember.title", { hub: hub.spec.name })}
+      subtitle={hub.status.running ? t("addMember.restart") : undefined}
       onClose={onClose}
       width={660}
       icon={
@@ -182,10 +195,10 @@ export function AddMemberDialog({
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button className="btn-primary" onClick={submit} disabled={!!busy}>
-            {busy ? "Working…" : "Add endpoint"}
+            {busy ? t("common.working") : t("inspector.addEndpoint")}
           </button>
         </>
       }
@@ -197,12 +210,13 @@ export function AddMemberDialog({
 
 /** Read-only troubleshooting report the user can paste into an issue. */
 export function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
-  const [text, setText] = useState("Collecting…");
+  const t = useT();
+  const [text, setText] = useState(() => t("diag.collecting"));
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    api.diagnostics().then(setText, (e) => setText(`Could not collect diagnostics: ${errorText(e)}`));
-  }, []);
+    api.diagnostics().then(setText, (e) => setText(t("diag.failed", { error: errorText(e) })));
+  }, [t]);
 
   const copy = async () => {
     try {
@@ -216,8 +230,8 @@ export function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="Diagnostics"
-      subtitle="Versions, port states and Windows logs. Nothing is changed or sent anywhere."
+      title={t("diag.title")}
+      subtitle={t("diag.subtitle")}
       onClose={onClose}
       width={860}
       icon={
@@ -228,10 +242,10 @@ export function DiagnosticsDialog({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <button className="btn-ghost" onClick={onClose}>
-            Close
+            {t("common.close")}
           </button>
           <button className="btn-primary" onClick={copy}>
-            <Copy size={15} /> {copied ? "Copied" : "Copy report"}
+            <Copy size={15} /> {copied ? t("diag.copied") : t("diag.copy")}
           </button>
         </>
       }

@@ -1,7 +1,7 @@
 import type { Edge, Node } from "@xyflow/react";
 import type { Rate } from "../store";
 import type { EndpointStatus, HubEndpoint, HubView, PortInfo, PortKind } from "../lib/types";
-import { endpointSubtitle, endpointTitle, HUB_META } from "../lib/format";
+import { endpointSubtitle, endpointTitle, HUB_COLOR } from "../lib/format";
 
 export type EndpointIcon = PortKind | "tcp";
 
@@ -64,7 +64,7 @@ export function buildGraph(
 
   for (const hub of hubs) {
     const { spec, status } = hub;
-    const color = HUB_META[spec.kind].color;
+    const color = HUB_COLOR[spec.kind];
     const hubRates = rates[spec.id] ?? [];
     const rows = Math.max(1, spec.members.length);
     const bandHeight = rows * ROW;

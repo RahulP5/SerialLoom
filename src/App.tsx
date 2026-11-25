@@ -23,6 +23,7 @@ import { api, openExternal } from "./lib/api";
 import { useTheme } from "./lib/theme";
 import { useUpdateChecks, useUpdates } from "./lib/updates";
 import { WEBSITE } from "./lib/project";
+import { message, t, useI18n, useT, type MessageKey } from "./i18n";
 import { TopologyView } from "./components/views/TopologyView";
 import { PortsView, VirtualPortsView } from "./components/views/ListViews";
 import { SettingsView } from "./components/views/SettingsView";
@@ -31,16 +32,46 @@ import { Inspector } from "./components/Inspector";
 import { HubWizard } from "./components/dialogs/HubWizard";
 import { AddMemberDialog, DiagnosticsDialog, PairDialog, VirtualPortDialog } from "./components/dialogs/SimpleDialogs";
 
-const NAV: { id: View; label: string; icon: typeof Workflow }[] = [
-  { id: "topology", label: "Topology", icon: Workflow },
-  { id: "ports", label: "Ports", icon: List },
-  { id: "virtual", label: "Virtual ports", icon: Cable },
-  { id: "settings", label: "Settings", icon: Settings },
-  { id: "about", label: "About", icon: Info },
+const NAV: { id: View; label: MessageKey; icon: typeof Workflow }[] = [
+  { id: "topology", label: "nav.topology", icon: Workflow },
+  { id: "ports", label: "nav.ports", icon: List },
+  { id: "virtual", label: "nav.virtual", icon: Cable },
+  { id: "settings", label: "nav.settings", icon: Settings },
+  { id: "about", label: "nav.about", icon: Info },
 ];
+
+/** Plural forms of a message as the tray needs them: one hub, or several. */
+function trayForms(key: MessageKey) {
+  const m = message(key);
+  if (typeof m === "string") return { one: m, other: m };
+  return { one: m.one ?? m.other, other: m.other };
+}
+
+/** Puts the notification-area menu in the app's language. */
+function useTrayLanguage() {
+  const lang = useI18n((s) => s.lang);
+  useEffect(() => {
+    const hubs = trayForms("tray.hubsRunning");
+    api
+      .setTrayText({
+        open: t("tray.open"),
+        quit: t("tray.quit"),
+        starting: t("tray.starting"),
+        noHubs: t("tray.noHubs"),
+        one: hubs.one,
+        other: hubs.other,
+      })
+      .catch(() => {
+        // An older backend keeps its English menu.
+      });
+  }, [lang]);
+}
 
 export default function App() {
   const { view, init, refresh } = useStore();
+  // Re-render everything when the language changes.
+  useI18n((s) => s.lang);
+  useTrayLanguage();
 
   useEffect(() => {
     init();
@@ -101,6 +132,7 @@ function Sidebar() {
   const { view, setView, refresh, hubs, info } = useStore();
   const running = hubs.filter((h) => h.status.running).length;
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const t = useT();
   useUpdateChecks(info?.version);
 
   const toggle = useCallback(
@@ -128,9 +160,9 @@ function Sidebar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [toggle]);
 
-  const hubText = `${running} of ${hubs.length} hub${hubs.length === 1 ? "" : "s"} running`;
+  const hubText = t("sidebar.hubsRunning", { running, count: hubs.length });
   const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
-  const toggleText = `${collapsed ? "Expand" : "Collapse"} sidebar (Ctrl+B)`;
+  const toggleText = collapsed ? t("sidebar.expand") : t("sidebar.collapse");
   const item = "group relative flex w-full items-center gap-2.5 rounded-lg py-2 text-sm transition-colors";
 
   return (
@@ -148,7 +180,7 @@ function Sidebar() {
         {!collapsed && (
           <div className="min-w-0">
             <div className="text-[15px] leading-tight font-semibold text-ink-0">SerialLoom</div>
-            <div className="text-[11px] whitespace-nowrap text-ink-400">Virtual COM ports</div>
+            <div className="text-[11px] whitespace-nowrap text-ink-400">{t("sidebar.tagline")}</div>
           </div>
         )}
       </div>
@@ -158,7 +190,7 @@ function Sidebar() {
             key={n.id}
             onClick={() => setView(n.id)}
             aria-current={view === n.id ? "page" : undefined}
-            aria-label={collapsed ? n.label : undefined}
+            aria-label={collapsed ? t(n.label) : undefined}
             className={clsx(
               item,
               collapsed ? "justify-center px-0" : "px-3",
@@ -166,8 +198,8 @@ function Sidebar() {
             )}
           >
             <n.icon size={collapsed ? 18 : 16} className={clsx("shrink-0", view === n.id && "text-cyan-300")} />
-            {!collapsed && <span className="whitespace-nowrap">{n.label}</span>}
-            <Tip text={n.label} show={collapsed} />
+            {!collapsed && <span className="whitespace-nowrap">{t(n.label)}</span>}
+            <Tip text={t(n.label)} show={collapsed} />
           </button>
         ))}
       </div>
@@ -184,7 +216,7 @@ function Sidebar() {
           )}
         >
           <ToggleIcon size={collapsed ? 18 : 16} className="shrink-0" />
-          {!collapsed && <span className="whitespace-nowrap">Collapse</span>}
+          {!collapsed && <span className="whitespace-nowrap">{t("sidebar.collapseShort")}</span>}
           <Tip text={toggleText} show={collapsed} />
         </button>
       </div>
@@ -198,9 +230,9 @@ function Sidebar() {
           <div className="group relative flex">
             <ThemeToggle />
           </div>
-          <button className="group relative hover:text-ink-200" onClick={() => refresh()} aria-label="Refresh ports">
+          <button className="group relative hover:text-ink-200" onClick={() => refresh()} aria-label={t("sidebar.refresh")}>
             <RefreshCw size={13} />
-            <Tip text="Refresh ports" show />
+            <Tip text={t("sidebar.refresh")} show />
           </button>
         </div>
       ) : (
@@ -214,7 +246,7 @@ function Sidebar() {
             <span>v{info?.version ?? "…"}</span>
             <div className="flex items-center gap-2.5">
               <ThemeToggle />
-              <button className="hover:text-ink-200" onClick={() => refresh()} title="Refresh ports">
+              <button className="hover:text-ink-200" onClick={() => refresh()} title={t("sidebar.refresh")}>
                 <RefreshCw size={13} />
               </button>
             </div>
@@ -227,9 +259,10 @@ function Sidebar() {
 
 function UpdateNotice({ compact = false }: { compact?: boolean }) {
   const { available, dismiss } = useUpdates();
+  const t = useT();
   if (!available) return null;
   if (compact) {
-    const text = `SerialLoom ${available.version} is available: download`;
+    const text = t("update.availableLink", { version: available.version });
     return (
       <button
         className="group relative rounded-md p-1 text-cyan-300 hover:bg-cyan-500/10"
@@ -246,23 +279,23 @@ function UpdateNotice({ compact = false }: { compact?: boolean }) {
       <div className="flex items-start gap-2">
         <CircleArrowUp size={14} className="mt-px shrink-0 text-cyan-300" />
         <span className="flex-1 text-xs leading-snug font-medium text-ink-0">
-          SerialLoom {available.version} is available
+          {t("update.available", { version: available.version })}
         </span>
         <button
           className="text-ink-400 hover:text-ink-0"
           onClick={dismiss}
-          aria-label="Dismiss"
-          title="Hide until the next version"
+          aria-label={t("common.dismiss")}
+          title={t("update.hide")}
         >
           <X size={13} />
         </button>
       </div>
       <div className="mt-1.5 flex gap-3 pl-[22px]">
         <button className="font-medium text-cyan-300 hover:underline" onClick={() => openExternal(WEBSITE.download)}>
-          Download
+          {t("update.download")}
         </button>
         <button className="text-ink-300 hover:text-ink-100 hover:underline" onClick={() => openExternal(available.notesUrl)}>
-          What's new
+          {t("update.whatsNew")}
         </button>
       </div>
     </div>
@@ -271,9 +304,14 @@ function UpdateNotice({ compact = false }: { compact?: boolean }) {
 
 function ThemeToggle() {
   const { resolved, setPref } = useTheme();
+  const t = useT();
   const next = resolved === "dark" ? "light" : "dark";
   return (
-    <button className="hover:text-ink-200" onClick={() => setPref(next)} title={`Switch to ${next} theme`}>
+    <button
+      className="hover:text-ink-200"
+      onClick={() => setPref(next)}
+      title={next === "light" ? t("theme.toLight") : t("theme.toDark")}
+    >
       {resolved === "dark" ? <Sun size={13} /> : <Moon size={13} />}
     </button>
   );
@@ -281,14 +319,15 @@ function ThemeToggle() {
 
 function DriverBanner() {
   const { driver, settings, saveSettings, setView, run } = useStore();
+  const t = useT();
   if (!driver) return null;
   if (driver.id === "demo") {
     return (
       <div className="flex items-center gap-2 border-b border-violet-500/30 bg-violet-500/10 px-4 py-2 text-xs text-violet-100">
         <Info size={14} className="shrink-0" />
-        <span className="flex-1">{driver.message ?? "Demo mode: ports are simulated."}</span>
+        <span className="flex-1">{t("driver.demoMessage")}</span>
         <button className="underline hover:text-ink-0" onClick={() => setView("settings")}>
-          Change driver
+          {t("driver.change")}
         </button>
       </div>
     );
@@ -298,16 +337,20 @@ function DriverBanner() {
     <div className="flex flex-wrap items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-xs text-amber-100">
       <CircleAlert size={14} className="shrink-0" />
       <span className="flex-1">
-        {driver.message ?? "The SerialLoom driver is not installed."} Bridging real ports to TCP works without it.
+        {driver.message ?? t("driver.notInstalled")} {t("driver.tcpWorks")}
       </span>
       {driver.installable && (
         <button
           className="btn-outline border-amber-400/40 px-2 py-1 text-xs"
           onClick={() =>
-            run("Installing driver (Windows asks for administrator permission)", () => api.installDriver(), "Driver installed")
+            run(
+              t("common.adminNote", { action: t("driver.installing") }),
+              () => api.installDriver(),
+              t("driver.installed"),
+            )
           }
         >
-          <Download size={13} /> Install driver
+          <Download size={13} /> {t("driver.install")}
         </button>
       )}
       {settings && (
@@ -315,7 +358,7 @@ function DriverBanner() {
           className="btn-outline border-amber-400/40 px-2 py-1 text-xs"
           onClick={() => saveSettings({ ...settings, driver: "demo" })}
         >
-          Try demo mode
+          {t("driver.tryDemo")}
         </button>
       )}
     </div>
@@ -342,26 +385,27 @@ function Dialogs() {
 
 function Toasts() {
   const { toasts, dismissToast } = useStore();
+  const t = useT();
   return (
     <div className="pointer-events-none fixed right-4 bottom-4 z-[60] flex w-96 flex-col gap-2">
-      {toasts.map((t) => (
+      {toasts.map((toast) => (
         <div
-          key={t.id}
+          key={toast.id}
           className={clsx(
             "panel pointer-events-auto flex items-start gap-2.5 px-3.5 py-3 text-sm shadow-2xl shadow-black/50",
-            t.kind === "error" && "border-rose-500/50",
-            t.kind === "success" && "border-emerald-500/40",
+            toast.kind === "error" && "border-rose-500/50",
+            toast.kind === "success" && "border-emerald-500/40",
           )}
         >
-          {t.kind === "error" ? (
+          {toast.kind === "error" ? (
             <CircleAlert size={16} className="mt-0.5 shrink-0 text-rose-400" />
-          ) : t.kind === "success" ? (
+          ) : toast.kind === "success" ? (
             <CircleCheck size={16} className="mt-0.5 shrink-0 text-emerald-400" />
           ) : (
             <Info size={16} className="mt-0.5 shrink-0 text-cyan-400" />
           )}
-          <span className="selectable flex-1 break-words text-ink-100">{t.text}</span>
-          <button className="text-ink-400 hover:text-ink-0" onClick={() => dismissToast(t.id)} aria-label="Dismiss">
+          <span className="selectable flex-1 break-words text-ink-100">{toast.text}</span>
+          <button className="text-ink-400 hover:text-ink-0" onClick={() => dismissToast(toast.id)} aria-label={t("common.dismiss")}>
             <X size={14} />
           </button>
         </div>

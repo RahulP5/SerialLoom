@@ -5,16 +5,10 @@ import { Modal } from "./Modal";
 import { EndpointEditor, defaultFor } from "./EndpointEditor";
 import { useStore } from "../../store";
 import { api } from "../../lib/api";
-import { HUB_META, specTitle } from "../../lib/format";
+import { HUB_COLOR, HUB_KINDS, hubDescription, hubLabel, specTitle } from "../../lib/format";
+import { useT } from "../../i18n";
 import { HUB_ICON } from "../nodes/HubNode";
 import type { CreateHubRequest, EndpointRequest, HubKind } from "../../lib/types";
-
-const ROLE_LABELS: Record<HubKind, [string, string]> = {
-  split: ["Source", "Output"],
-  join: ["Combined", "Input"],
-  bridge: ["Side A", "Side B"],
-  bus: ["Node 1", "Node"],
-};
 
 function defaults(kind: HubKind, firstFree?: string): Pick<CreateHubRequest, "master" | "members"> {
   const existing = defaultFor("serial", firstFree);
@@ -33,6 +27,7 @@ function defaults(kind: HubKind, firstFree?: string): Pick<CreateHubRequest, "ma
 
 export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubRequest>; onClose: () => void }) {
   const { ports, run, select, busy, helper } = useStore();
+  const t = useT();
   const firstFree = ports.find((p) => !p.inUseBy && p.kind !== "virtual")?.name;
 
   const initialKind = preset?.kind ?? "split";
@@ -52,8 +47,9 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
     setMembers(d.members);
   };
 
-  const [masterLabel, memberLabel] = ROLE_LABELS[kind];
-  const autoName = useMemo(() => `${HUB_META[kind].label} ${specTitle(master)}`, [kind, master]);
+  const masterLabel = t(`wizard.${kind}.master`);
+  const memberLabel = t(`wizard.${kind}.member`);
+  const autoName = useMemo(() => t("wizard.autoName", { kind: hubLabel(kind), port: specTitle(master) }), [t, kind, master]);
   const virtualCount = [master, ...members].filter((e) => e.kind === "newVirtual").length;
 
   const submit = async () => {
@@ -66,9 +62,9 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
       start,
     };
     const created = await run(
-      virtualCount ? "Creating virtual ports (Windows may ask for permission)" : "Creating hub",
+      t(virtualCount ? "wizard.creatingPorts" : "wizard.creatingHub"),
       () => api.createHub(request),
-      `${HUB_META[kind].label} "${request.name}" created`,
+      t("wizard.created", { kind: hubLabel(kind), name: request.name }),
     );
     if (created) {
       select({ type: "hub", id: created.spec.id });
@@ -77,38 +73,39 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
   };
 
   const Icon = HUB_ICON[kind];
-  const meta = HUB_META[kind];
+  const color = HUB_COLOR[kind];
 
   return (
     <Modal
-      title="New connection"
-      subtitle="Choose how the ports should be woven together."
+      title={t("wizard.title")}
+      subtitle={t("wizard.subtitle")}
       onClose={onClose}
       width={760}
       icon={
-        <div className="grid h-9 w-9 place-items-center rounded-xl" style={{ background: `${meta.color}22`, color: meta.color }}>
+        <div className="grid h-9 w-9 place-items-center rounded-xl" style={{ background: `${color}22`, color }}>
           <Icon size={18} />
         </div>
       }
       footer={
         <>
-          <span className="mr-auto self-center text-xs text-ink-400">
+          <span className="mr-auto min-w-0 flex-1 self-center text-xs text-ink-400">
             {virtualCount > 0 &&
-              `${virtualCount} virtual port${virtualCount > 1 ? "s" : ""} will be created.${helper?.installed ? "" : " Windows asks for administrator approval once."}`}
+              [t("wizard.virtualCount", { count: virtualCount }), helper?.installed ? "" : t("wizard.adminOnce")]
+                .filter(Boolean)
+                .join(" ")}
           </span>
           <button className="btn-ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button className="btn-primary" onClick={submit} disabled={!!busy}>
-            {busy ? "Working…" : `Create ${meta.label.toLowerCase()}`}
+            {busy ? t("common.working") : t(`wizard.${kind}.create`)}
           </button>
         </>
       }
     >
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        {(Object.keys(HUB_META) as HubKind[]).map((k) => {
+        {HUB_KINDS.map((k) => {
           const KIcon = HUB_ICON[k];
-          const m = HUB_META[k];
           return (
             <button
               key={k}
@@ -117,11 +114,11 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
                 "rounded-xl border p-3 text-left transition-colors",
                 k === kind ? "bg-ink-800" : "border-ink-700 hover:border-ink-500",
               )}
-              style={k === kind ? { borderColor: m.color } : undefined}
+              style={k === kind ? { borderColor: HUB_COLOR[k] } : undefined}
             >
-              <KIcon size={18} style={{ color: m.color }} />
-              <div className="mt-1.5 text-sm font-semibold text-ink-0">{m.label}</div>
-              <div className="mt-0.5 text-[11px] leading-snug text-ink-300">{m.describe}</div>
+              <KIcon size={18} style={{ color: HUB_COLOR[k] }} />
+              <div className="mt-1.5 text-sm font-semibold text-ink-0">{hubLabel(k)}</div>
+              <div className="mt-0.5 text-[11px] leading-snug text-ink-300">{hubDescription(k)}</div>
             </button>
           );
         })}
@@ -129,7 +126,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
 
       <Preview kind={kind} master={master} members={members} />
 
-      <label className="label mt-4">Name</label>
+      <label className="label mt-4">{t("wizard.name")}</label>
       <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={autoName} />
 
       <div className="mt-4 space-y-2">
@@ -137,7 +134,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
         {members.map((m, i) => (
           <EndpointEditor
             key={i}
-            label={kind === "bridge" ? memberLabel : `${memberLabel} ${kind === "bus" ? i + 2 : i + 1}`}
+            label={kind === "bridge" ? memberLabel : t("wizard.numbered", { role: memberLabel, n: kind === "bus" ? i + 2 : i + 1 })}
             value={m}
             onChange={(v) => setMembers(members.map((x, j) => (j === i ? v : x)))}
             onRemove={kind !== "bridge" && members.length > 1 ? () => setMembers(members.filter((_, j) => j !== i)) : undefined}
@@ -148,7 +145,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
             className="btn-outline w-full border-dashed"
             onClick={() => setMembers([...members, kind === "join" ? defaultFor("serial") : defaultFor("newVirtual")])}
           >
-            <Plus size={15} /> Add {memberLabel.toLowerCase()}
+            <Plus size={15} /> {t(`wizard.${kind}.add`)}
           </button>
         )}
       </div>
@@ -156,7 +153,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
       <div className="mt-4 flex gap-5 text-sm text-ink-200">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} className="accent-loom-500" />
-          Start now
+          {t("wizard.startNow")}
         </label>
         <label className="flex items-center gap-2">
           <input
@@ -165,7 +162,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
             onChange={(e) => setAutostart(e.target.checked)}
             className="accent-loom-500"
           />
-          Start when SerialLoom opens
+          {t("common.startOnOpen")}
         </label>
       </div>
     </Modal>
@@ -174,7 +171,7 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
 
 /** Small live diagram of what will be created. */
 function Preview({ kind, master, members }: { kind: HubKind; master: EndpointRequest; members: EndpointRequest[] }) {
-  const color = HUB_META[kind].color;
+  const color = HUB_COLOR[kind];
   const rowH = 30;
   const h = Math.max(members.length * rowH, rowH) + 20;
   const cy = h / 2;
@@ -215,6 +212,7 @@ function Preview({ kind, master, members }: { kind: HubKind; master: EndpointReq
 }
 
 function Pill({ x, y, w, text, virtual }: { x: number; y: number; w: number; text: string; virtual: boolean }) {
+  const t = useT();
   return (
     <g>
       <rect
@@ -229,7 +227,7 @@ function Pill({ x, y, w, text, virtual }: { x: number; y: number; w: number; tex
       />
       <text x={x + w / 2} y={y + 4} textAnchor="middle" fontSize={11.5} fontFamily="Cascadia Code, Consolas, monospace" fill="var(--color-ink-100)">
         {text.length > 22 ? `${text.slice(0, 21)}…` : text}
-        {virtual ? "  (new)" : ""}
+        {virtual ? `  ${t("wizard.new")}` : ""}
       </text>
     </g>
   );

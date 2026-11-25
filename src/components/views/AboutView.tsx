@@ -2,35 +2,34 @@ import { ExternalLink } from "lucide-react";
 import { useStore } from "../../store";
 import { openExternal } from "../../lib/api";
 import { COPYRIGHT_YEAR, DEVELOPER } from "../../lib/project";
+import { tr, useT } from "../../i18n";
 
 export function AboutView() {
   const info = useStore((s) => s.info);
+  const t = useT();
   const repo = info?.repository ?? "";
 
   return (
     <div className="flex h-full justify-center overflow-y-auto px-8 py-7">
       <div className="my-auto w-full max-w-lg text-center">
-        <img src="/logo.svg" alt="SerialLoom logo" className="mx-auto h-24 w-24 drop-shadow-[0_10px_30px_rgba(99,102,241,0.35)]" />
+        <img src="/logo.svg" alt={t("about.logo")} className="mx-auto h-24 w-24 drop-shadow-[0_10px_30px_rgba(99,102,241,0.35)]" />
         <h1 className="mt-4 text-2xl font-semibold text-ink-0">SerialLoom</h1>
-        <p className="mt-1 text-sm text-ink-300">Version {info?.version ?? "…"}</p>
-        <p className="mt-4 text-sm leading-relaxed text-ink-200">
-          Weave serial ports together: create virtual COM port pairs, split one port between several applications, join
-          ports, and bridge serial devices to the network.
-        </p>
+        <p className="mt-1 text-sm text-ink-300">{t("about.version", { version: info?.version ?? "…" })}</p>
+        <p className="mt-4 text-sm leading-relaxed text-ink-200">{t("about.description")}</p>
         <div className="mt-5 flex justify-center gap-2">
           {repo && (
             <button className="btn-outline" onClick={() => openExternal(repo)}>
-              <GitHubMark /> Source code
+              <GitHubMark /> {t("about.source")}
             </button>
           )}
           {repo && (
             <button className="btn-outline" onClick={() => openExternal(`${repo}/issues`)}>
-              <ExternalLink size={14} /> Report an issue
+              <ExternalLink size={14} /> {t("about.report")}
             </button>
           )}
         </div>
         <section className="panel mt-8 p-4 text-left">
-          <h2 className="label">Developers</h2>
+          <h2 className="label">{t("about.developers")}</h2>
           <div className="mt-2 flex items-center gap-3">
             <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-linear-to-br from-loom-500 to-cyan-500 text-sm font-semibold text-white">
               {DEVELOPER.name
@@ -40,27 +39,35 @@ export function AboutView() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="font-semibold text-ink-0">{DEVELOPER.name}</div>
-              <div className="text-xs text-ink-400">Creator and maintainer</div>
+              <div className="text-xs text-ink-400">{t("about.role")}</div>
             </div>
             <button className="btn-outline px-2.5 py-1 text-xs" onClick={() => openExternal(DEVELOPER.github)}>
-              <GitHubMark /> GitHub profile
+              <GitHubMark /> {t("about.github")}
             </button>
           </div>
         </section>
 
         <p className="mt-6 text-xs text-ink-300">
-          © {COPYRIGHT_YEAR}{" "}
-          <button className="text-cyan-300 hover:underline" onClick={() => openExternal(DEVELOPER.github)}>
-            {DEVELOPER.name}
-          </button>
-          . Free and open-source software under the MIT License.
+          {tr("about.license", {
+            year: COPYRIGHT_YEAR,
+            name: (
+              <button className="text-cyan-300 hover:underline" onClick={() => openExternal(DEVELOPER.github)}>
+                {DEVELOPER.name}
+              </button>
+            ),
+          })}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-ink-400">
-          Virtual COM ports use Windows' built-in USB serial driver through the bundled, Microsoft-signed{" "}
-          <button className="text-cyan-300 hover:underline" onClick={() => openExternal("https://github.com/vadimgrn/usbip-win2")}>
-            usbip-win2
-          </button>{" "}
-          virtual USB controller (BSD-2-Clause). See THIRD_PARTY_NOTICES.md.
+          {tr("about.thirdParty", {
+            usbip: (
+              <button
+                className="text-cyan-300 hover:underline"
+                onClick={() => openExternal("https://github.com/vadimgrn/usbip-win2")}
+              >
+                usbip-win2
+              </button>
+            ),
+          })}
         </p>
       </div>
     </div>

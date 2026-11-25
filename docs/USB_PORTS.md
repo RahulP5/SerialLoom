@@ -25,6 +25,16 @@ Any program ──opens COM5──► usbser.sys            (Windows' built-in U
 - **Real hardware first:** a virtual port never takes a COM number that belongs to real hardware, even when that device is unplugged and only its reservation remains. Leftovers of deleted SerialLoom ports do not block a number.
 - **Deleting a port removes it from Windows:** SerialLoom unplugs the virtual device, then removes its Windows entries (the COM port, the USB function and the USB device) and releases its COM number. This needs administrator rights, handled the same way. Only devices with SerialLoom's USB ID *and* serial-number pattern (`SL` + 10 hex digits) are ever removed. Uninstalling SerialLoom removes all of them.
 
+## Limitations
+
+Programs talk to Windows' own `usbser.sys`, not to SerialLoom, so a few things differ from a classic serial port:
+
+- **Interval timeouts** ([#16](https://github.com/RahulP5/SerialLoom/issues/16)): when a program sets `ReadIntervalTimeout`, a read can return 0 bytes *before the first byte arrives*, after a few milliseconds up to one system timer tick (about 16 ms). By the Win32 rules, the interval timer should only start after the first byte. A program whose peer takes longer to answer sees an empty read. This happens in `usbser.sys`'s timeout handling: SerialLoom never completes a read without data. pyserial's `inter_byte_timeout` sets this timeout, and some Modbus libraries (e.g. `modbus_tk`) set it by default. **Workaround:** use a total timeout only (`ReadTotalTimeoutConstant`; in pyserial, `inter_byte_timeout=None`).
+- **CTS:** a USB serial device has no way to report CTS (the CDC `SERIAL_STATE` notification has no CTS bit), so CTS always reads as on. RTS from the other port of a pair does not reach it, and RTS/CTS flow control never holds a write back. RS-485 direction control through RTS cannot be emulated.
+- **DSR flow control:** `usbser.sys` does not hold writes while DSR is off, even with DSR flow control (`fOutxDsrFlow`) turned on. Programs can still read DSR and wait for `EV_DSR`.
+- **Break:** a program can send a break, but the other port does not see one: `usbser.sys` reports no break event or error for it.
+- **RI (ring indicator)** is always off.
+
 ## How long will this keep working?
 
 - **License:** usbip-win2 is BSD-2-Clause. The right to use and redistribute the bundled version does not expire, and later license changes by the author cannot take it back.

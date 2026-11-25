@@ -28,7 +28,7 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 
 | | |
 |---|---|
-| **Virtual COM ports** | Create `COM20`, `COM21`, … that any Windows program can open. Baud rate, timeouts, DTR/RTS and `WaitCommEvent` behave like a real port. |
+| **Virtual COM ports** | Create `COM20`, `COM21`, … that any Windows program can open. Baud rate, timeouts, DTR/RTS and `WaitCommEvent` work as on a real port, with a few [limitations](docs/USB_PORTS.md#limitations) (interval timeouts, CTS, break). |
 | **Virtual null-modem pairs** | Two virtual ports wired together, so two programs can talk as if connected by a cable. |
 | **Split** | Share one physical port (e.g. a GPS on `COM3`) with several programs. Each gets its own virtual port. |
 | **Join** | Merge several ports into one virtual port. |

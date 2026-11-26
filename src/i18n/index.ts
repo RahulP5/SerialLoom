@@ -9,6 +9,7 @@ export const LANGUAGES = [
   { code: "en", name: "English" },
   { code: "de", name: "Deutsch" },
   { code: "es", name: "Español" },
+  { code: "fr", name: "Français" },
   { code: "pt-BR", name: "Português (Brasil)" },
   { code: "ru", name: "Русский" },
   { code: "zh-CN", name: "简体中文" },
@@ -23,6 +24,7 @@ export type LanguagePref = "system" | Lang;
 const LOADERS: Record<Exclude<Lang, "en">, () => Promise<Messages>> = {
   de: () => import("./de").then((m) => m.de),
   es: () => import("./es").then((m) => m.es),
+  fr: () => import("./fr").then((m) => m.fr),
   "pt-BR": () => import("./pt-BR").then((m) => m.ptBR),
   ru: () => import("./ru").then((m) => m.ru),
   "zh-CN": () => import("./zh-CN").then((m) => m.zhCN),

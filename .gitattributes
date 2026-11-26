@@ -4,3 +4,9 @@
 *.png binary
 *.ico binary
 *.icns binary
+
+# GitHub's language statistics: leave out the translation string tables
+# and the browser-only fake backend, which are not part of the app's code.
+src/i18n/*.ts linguist-detectable=false
+src/i18n/index.ts linguist-detectable
+src/lib/mock.ts linguist-detectable=false

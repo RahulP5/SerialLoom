@@ -1,12 +1,19 @@
-import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo, useLayoutEffect } from "react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import clsx from "clsx";
 import type { EndpointNode as EndpointNodeType } from "../graph";
 import { PortIcon, KIND_COLOR } from "../PortIcon";
 import { formatRate } from "../../lib/format";
 import { useT } from "../../i18n";
 
-function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
+function EndpointNodeImpl({ id, data, selected }: NodeProps<EndpointNodeType>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const mirrored = data.mirrored;
+
+  useLayoutEffect(() => {
+    updateNodeInternals(id);
+  }, [id, mirrored, updateNodeInternals]);
+
   const t = useT();
   const kindColor = KIND_COLOR[data.icon];
   const error = data.status?.lastError;
@@ -14,17 +21,21 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
   const connected = data.status?.connected;
   const state = !data.running ? "idle" : error && !connected ? "error" : connected ? "live" : "waiting";
   const dot = { idle: "#475569", error: "#f43f5e", live: "#34d399", waiting: "#fbbf24" }[state];
+  const summary = `${t(`kind.${data.icon}`)} · ${data.subtitle}`;
+  const stateLabel = t(`node.state.${state}`);
+  const tooltip = [data.title, summary, stateLabel, error, warning].filter(Boolean).join("\n");
   const busy = (data.rate?.rx ?? 0) + (data.rate?.tx ?? 0) > 0;
 
   return (
     <div
+      data-mirror-hub={data.hubId}
       className={clsx(
         "w-[220px] rounded-xl border bg-ink-850/95 px-3 py-2.5 shadow-xl shadow-black/30 transition-colors",
         selected ? "border-loom-400" : "border-ink-700 hover:border-ink-500",
       )}
-      title={error ?? warning ?? undefined}
+      title={tooltip}
     >
-      <Handle id="l" type="target" position={Position.Left} style={{ background: data.color }} />
+      <Handle id="l" type="target" position={mirrored ? Position.Right : Position.Left} style={{ background: data.color }} />
       <div className="flex items-center gap-2.5">
         <div
           className="grid h-9 w-9 shrink-0 place-items-center rounded-lg"
@@ -42,13 +53,13 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
             )}
           </div>
           <div className="truncate text-[11px] text-ink-300">
-            {t(`kind.${data.icon}`)} · {data.subtitle}
+            {summary}
           </div>
         </div>
         <span
           className={clsx("h-2.5 w-2.5 shrink-0 rounded-full", state === "live" && busy && "pulse")}
           style={{ background: dot, ["--ring" as string]: `${dot}88` }}
-          title={t(`node.state.${state}`)}
+          title={stateLabel}
         />
       </div>
       {data.running && (
@@ -63,7 +74,7 @@ function EndpointNodeImpl({ data, selected }: NodeProps<EndpointNodeType>) {
       {!error && warning && data.running && (
         <div className="mt-1.5 truncate text-[10.5px] text-amber-300">{warning}</div>
       )}
-      <Handle id="r" type="source" position={Position.Right} style={{ background: data.color }} />
+      <Handle id="r" type="source" position={mirrored ? Position.Left : Position.Right} style={{ background: data.color }} />
     </div>
   );
 }

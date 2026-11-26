@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from "@xyflow/react";
+import { BaseEdge, EdgeLabelRenderer, Position, getBezierPath, type EdgeProps } from "@xyflow/react";
 import type { TrafficEdge as TrafficEdgeType } from "../graph";
 import { formatRate } from "../../lib/format";
 
@@ -11,6 +11,7 @@ function TrafficEdgeImpl(props: EdgeProps<TrafficEdgeType>) {
   const fwd = data?.forward ?? 0;
   const back = data?.backward ?? 0;
   const running = data?.running ?? false;
+  const reversed = sourcePosition === Position.Left;
   const active = running && fwd + back > 0;
 
   return (
@@ -47,8 +48,8 @@ function TrafficEdgeImpl(props: EdgeProps<TrafficEdgeType>) {
           >
             {data?.label ?? (
               <>
-                <span style={{ color }}>→ {formatRate(fwd)}</span>
-                {back > 0 && <span className="ml-1.5 text-ink-300">← {formatRate(back)}</span>}
+                <span style={{ color }}>{reversed ? "←" : "→"} {formatRate(fwd)}</span>
+                {back > 0 && <span className="ml-1.5 text-ink-300">{reversed ? "→" : "←"} {formatRate(back)}</span>}
               </>
             )}
           </div>

@@ -9,6 +9,7 @@ use serialloom_core::config::{AppSettings, save_json};
 use serialloom_core::model::*;
 use serialloom_core::{Engine, Result as CoreResult};
 use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::AppState;
 use crate::automation::AutomationInfo;
@@ -131,6 +132,24 @@ pub async fn rename_virtual_port(
 #[tauri::command]
 pub async fn remove_virtual_port(state: State<'_, AppState>, name: String) -> CmdResult<()> {
     blocking(&state, move |e| e.remove_virtual_port(&name)).await
+}
+
+#[tauri::command]
+pub async fn save_topology_backup(app: AppHandle, text: String) -> CmdResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .set_file_name("serialloom-topology.json")
+            .blocking_save_file();
+        let Some(path) = path else { return Ok(false) };
+        let path = path.into_path().map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| e.to_string())?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| format!("internal error: {e}"))?
 }
 
 #[tauri::command]

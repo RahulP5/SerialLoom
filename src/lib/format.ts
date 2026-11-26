@@ -51,7 +51,7 @@ export function speedMismatch(endpoints: HubEndpoint[], statuses: EndpointStatus
   return speeds.map((s) => `${s.port} ${s.baud}`).join(", ");
 }
 
-export function endpointSubtitle(e: HubEndpoint, status?: EndpointStatus): string {
+export function endpointSubtitle(e: HubEndpoint, running: boolean, status?: EndpointStatus): string {
   const s = e.spec;
   switch (s.kind) {
     case "serial":
@@ -62,7 +62,7 @@ export function endpointSubtitle(e: HubEndpoint, status?: EndpointStatus): strin
         ? t("endpoint.app", { baud: status.line.baudRate, framing: status.line.framing })
         : t("endpoint.appConnected");
     case "tcpServer":
-      return t("endpoint.listen", { bind: s.bind });
+      return running ? t("endpoint.listen", { bind: s.bind }) : `${t("common.stopped")} · ${s.bind}`;
     case "tcpClient":
       return t("endpoint.tcpClient");
   }

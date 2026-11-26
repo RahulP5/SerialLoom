@@ -1,7 +1,7 @@
 {
   "name": "serialloom",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "SerialLoom: open-source virtual COM port manager with a visual topology editor",
   "license": "MIT",
   "type": "module",

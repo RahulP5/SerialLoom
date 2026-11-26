@@ -1,3 +1,5 @@
+#[cfg(windows)]
+mod topology_menu;
 mod automation;
 mod commands;
 mod tray;
@@ -74,6 +76,8 @@ pub fn run() {
                 })?;
 
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(windows)]
+                topology_menu::install(&window);
                 fit_to_work_area(&window);
                 // The window starts hidden (tauri.conf.json) so a background
                 // start never flashes it.
@@ -116,6 +120,7 @@ pub fn run() {
             commands::create_virtual_ports,
             commands::rename_virtual_port,
             commands::remove_virtual_port,
+            commands::save_topology_backup,
             commands::list_hubs,
             commands::create_hub,
             commands::start_hub,

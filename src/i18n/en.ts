@@ -170,7 +170,15 @@ export const en = {
   "virtual.renamed": "{port} is now {target}",
 
   // Topology page
+  "topology.import": "Import JSON",
+  "topology.export": "Export JSON",
+  "topology.backupExported": "Topology backup saved.",
+  "topology.backupImported": "Topology imported. New connections are stopped.",
+  "topology.backupInvalid": "Invalid or unsupported SerialLoom topology backup.",
+  "topology.backupHubConflict": "A connection named {name} already has different settings. Rename it before importing.",
+  "topology.backupPortConflict": "Could not restore {port} with its original COM number.",
   "topology.virtualPair": "Virtual pair",
+  "topology.flipHorizontal": "Flip horizontally",
   "topology.autoLayout": "Auto-layout",
   "topology.autoLayoutTip": "Reset node positions",
   "topology.emptyTitle": "Weave your first connection",

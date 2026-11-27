@@ -65,8 +65,8 @@ export function buildGraph(
 ): { nodes: GraphNode[]; edges: Edge[] } {
   const nodes: GraphNode[] = [];
   const edges: Edge[] = [];
-  const tcpServers = new Map<string, string[]>();
-  const tcpClients: { id: string; address: string; isMaster: boolean }[] = [];
+  const tcpServers = new Map<string, { id: string; connected: boolean }[]>();
+  const tcpClients: { id: string; address: string; isMaster: boolean; connected: boolean; rate: Rate }[] = [];
   let y = 0;
 
   for (const hub of hubs) {
@@ -113,18 +113,21 @@ export function buildGraph(
 
     all.forEach(({ spec: endpoint }, i) => {
       const id = `${spec.id}:${i}`;
+      const r = hubRates[i] ?? { rx: 0, tx: 0 };
+      const connected = status.running && status.endpoints[i]?.connected === true;
       if (endpoint.kind === "tcpServer") {
         const address = endpoint.bind.trim().toLowerCase();
         if (address) {
           const servers = tcpServers.get(address) ?? [];
-          servers.push(id);
+          servers.push({ id, connected });
           tcpServers.set(address, servers);
         }
       } else if (endpoint.kind === "tcpClient") {
-        tcpClients.push({ id, address: endpoint.address.trim().toLowerCase(), isMaster: i === 0 });
+        tcpClients.push({
+          id, address: endpoint.address.trim().toLowerCase(), isMaster: i === 0, connected, rate: r,
+        });
       }
 
-      const r = hubRates[i] ?? { rx: 0, tx: 0 };
       const isMaster = i === 0;
       edges.push({
         id: `e:${spec.id}:${i}`,
@@ -147,19 +150,28 @@ export function buildGraph(
   }
 
   // TCP links represent configured targets, even when either connection is stopped.
-  for (const { id, address, isMaster } of tcpClients) {
+  for (const { id, address, isMaster, connected, rate } of tcpClients) {
     const servers = tcpServers.get(address);
     if (servers?.length !== 1) continue;
+    const [server] = servers;
     edges.push({
-      id: `tcp:${servers[0]}:${id}`,
-      source: servers[0],
+      id: `tcp:${server.id}:${id}`,
+      type: "traffic",
+      source: server.id,
       target: id,
       sourceHandle: "r",
       // The hub uses the right handle of a master and the left handle of a member.
       targetHandle: isMaster ? "l" : "r",
       selectable: false,
       ariaLabel: `TCP ${address}`,
-      style: { stroke: "#34d399", strokeWidth: 2, strokeDasharray: "6 6" },
+      data: {
+        // This edge runs from server to client, so client RX is forward.
+        forward: rate.rx,
+        backward: rate.tx,
+        color: "#34d399",
+        running: server.connected && connected,
+        dashed: true,
+      },
     });
   }
 

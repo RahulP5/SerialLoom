@@ -1,6 +1,7 @@
-import type { Messages } from "./en";
+import { replayMessages, type Messages } from "./en";
 
 export const de: Messages = {
+  ...replayMessages,
   "common.cancel": "Abbrechen",
   "common.save": "Speichern",
   "common.close": "Schließen",

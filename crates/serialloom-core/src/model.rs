@@ -76,6 +76,44 @@ impl SerialSettings {
 // Endpoints and hubs
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplayFormat {
+    File,
+    Nmea0183,
+    Nmea2000,
+    Gps0183,
+    Gps2000,
+}
+
+impl ReplayFormat {
+    pub fn is_gps(self) -> bool {
+        matches!(self, Self::Gps0183 | Self::Gps2000)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GpsSettings {
+    pub latitude: String,
+    pub longitude: String,
+    pub course: String,
+    pub speed: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaySettings {
+    pub path: String,
+    pub format: ReplayFormat,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gps: Option<GpsSettings>,
+    pub repeat: bool,
+    pub timestamped: bool,
+    pub bytes_per_second: u32,
+    pub cycle_ms: u32,
+    pub lines_per_cycle: u32,
+}
+
 /// Something a hub can read bytes from and write bytes to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -93,6 +131,7 @@ pub enum EndpointSpec {
     TcpServer { bind: String },
     /// Connect to a remote TCP server and reconnect when the link drops.
     TcpClient { address: String },
+    Replay { settings: ReplaySettings },
 }
 
 impl EndpointSpec {
@@ -101,6 +140,11 @@ impl EndpointSpec {
             EndpointSpec::Serial { port, .. } | EndpointSpec::Virtual { port } => port.clone(),
             EndpointSpec::TcpServer { bind } => format!("tcp://{bind} (listen)"),
             EndpointSpec::TcpClient { address } => format!("tcp://{address}"),
+            EndpointSpec::Replay { settings } => match settings.format {
+                ReplayFormat::Gps0183 => "NMEA 0183 simulator".into(),
+                ReplayFormat::Gps2000 => "NMEA 2000 simulator".into(),
+                _ => settings.path.clone(),
+            },
         }
     }
 
@@ -205,6 +249,9 @@ pub enum EndpointRequest {
     },
     TcpClient {
         address: String,
+    },
+    Replay {
+        settings: ReplaySettings,
     },
     NewVirtual {
         /// `COM20`, or `COM#` to pick the next free number.

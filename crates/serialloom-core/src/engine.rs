@@ -459,6 +459,10 @@ impl Engine {
                         },
                         false,
                     ),
+                    EndpointRequest::Replay { mut settings } => {
+                        settings.path = settings.path.trim().into();
+                        (EndpointSpec::Replay { settings }, false)
+                    }
                     EndpointRequest::NewVirtual { .. } => {
                         let port = created.next().expect("one port per request").name;
                         (EndpointSpec::Virtual { port }, true)
@@ -566,6 +570,8 @@ fn validate_request(r: &EndpointRequest) -> Result<()> {
             .parse::<SocketAddr>()
             .map(|_| ())
             .map_err(|_| Error::Invalid(format!("'{bind}' is not a listen address such as 0.0.0.0:7000"))),
+        EndpointRequest::Replay { settings } => crate::replay::validate(settings)
+            .map_err(|error| Error::Invalid(error.to_string())),
         EndpointRequest::TcpClient { address } => {
             let a = address.trim();
             match a.rsplit_once(':') {

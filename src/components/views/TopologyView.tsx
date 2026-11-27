@@ -22,13 +22,15 @@ import { buildGraph, type GraphNode } from "../graph";
 import { EndpointNode } from "../nodes/EndpointNode";
 import { HubNode } from "../nodes/HubNode";
 import { TrafficEdge } from "../nodes/TrafficEdge";
-import { KindBadge } from "../PortIcon";
-import { DEFAULT_SERIAL, type HubKind, type PortInfo } from "../../lib/types";
+import { KindBadge, PortIcon } from "../PortIcon";
+import { replaySource } from "../dialogs/EndpointEditor";
+import { DEFAULT_SERIAL, SOURCE_FORMATS, isGps, type HubKind, type PortInfo } from "../../lib/types";
 import { HUB_COLOR, HUB_KINDS, hubDescription, hubLabel } from "../../lib/format";
 import { useI18n, useT } from "../../i18n";
 
 const nodeTypes = { endpoint: EndpointNode, hub: HubNode };
 const edgeTypes = { traffic: TrafficEdge };
+const REPLAY_MIME = "application/x-serialloom-replay";
 export const DRAG_MIME = "application/x-serialloom-port";
 
 export function TopologyView() {
@@ -129,20 +131,21 @@ function Canvas() {
     (document.elementFromPoint(x, y)?.closest("[data-hub-id]") as HTMLElement | null)?.dataset.hubId ?? null;
 
   const onDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes(DRAG_MIME)) return;
+    if (!e.dataTransfer.types.some((type) => type === DRAG_MIME || type === REPLAY_MIME)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     setDropHub(hubAt(e.clientX, e.clientY));
   };
 
   const onDrop = (e: React.DragEvent) => {
+    const format = SOURCE_FORMATS.find((format) => format === e.dataTransfer.getData(REPLAY_MIME));
     const port = e.dataTransfer.getData(DRAG_MIME);
     setDropHub(null);
-    if (!port) return;
+    if (!port && !format) return;
     e.preventDefault();
     const hubId = hubAt(e.clientX, e.clientY);
     const isVirtual = ports.find((p) => p.name === port)?.kind === "virtual";
-    const request = isVirtual
+    const request = format ? replaySource(format) : isVirtual
       ? ({ kind: "virtual", port } as const)
       : ({ kind: "serial", port, settings: DEFAULT_SERIAL } as const);
     if (hubId) openDialog({ type: "addMember", hubId, preset: request });
@@ -248,7 +251,7 @@ function EmptyState() {
 }
 
 function PortPalette() {
-  const { ports, hubs } = useStore();
+  const { ports, hubs, openDialog } = useStore();
   const t = useT();
   const visible = ports;
   const hubName = (id: string | null) => hubs.find((h) => h.spec.id === id)?.spec.name;
@@ -260,6 +263,17 @@ function PortPalette() {
         <p className="mt-1 text-[11px] leading-snug text-ink-400">{t("topology.paletteHint")}</p>
       </div>
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-3 pb-3">
+        {SOURCE_FORMATS.map((format) => (
+          <button key={format} type="button" draggable className="btn-outline w-full justify-start"
+            onDragStart={(event) => {
+              event.dataTransfer.setData(REPLAY_MIME, format);
+              event.dataTransfer.effectAllowed = "copy";
+            }}
+            onClick={() => openDialog({ type: "hub", preset: { kind: "split", master: replaySource(format) } })}>
+            <PortIcon kind={isGps(format) ? "gps" : "replay"} size={14} />
+            {t(`editor.${format}`)}
+          </button>
+        ))}
         {visible.length === 0 && <p className="px-1 py-6 text-center text-xs text-ink-400">{t("common.noSerialPorts")}</p>}
         {visible.map((p) => (
           <PaletteItem key={p.name} port={p} busyBy={hubName(p.inUseBy)} />

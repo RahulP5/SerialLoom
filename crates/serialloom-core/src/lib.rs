@@ -20,10 +20,12 @@ pub mod config;
 pub mod driver;
 pub mod engine;
 pub mod error;
+mod gps;
 pub mod hub;
 pub mod logging;
 pub mod model;
 pub mod ports;
+mod replay;
 pub mod usbip;
 #[cfg(windows)]
 pub mod winpipe;

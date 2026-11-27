@@ -1,4 +1,4 @@
-import { Bluetooth, Cable, Cpu, Globe, Plug, Usb } from "lucide-react";
+import { Bluetooth, Cable, Cpu, FileInput, Globe, Plug, Satellite, Usb } from "lucide-react";
 import type { EndpointIcon } from "./graph";
 import { useT } from "../i18n";
 
@@ -8,6 +8,8 @@ const ICONS = {
   bluetooth: Bluetooth,
   virtual: Cable,
   tcp: Globe,
+  replay: FileInput,
+  gps: Satellite,
   unknown: Plug,
 } as const;
 
@@ -17,6 +19,8 @@ export const KIND_COLOR: Record<EndpointIcon, string> = {
   bluetooth: "#38bdf8",
   virtual: "#a78bfa",
   tcp: "#34d399",
+  replay: "#f0abfc",
+  gps: "#67e8f9",
   unknown: "#94a3b8",
 };
 

@@ -1,6 +1,7 @@
-import type { Messages } from "./en";
+import { replayMessages, type Messages } from "./en";
 
 export const ko: Messages = {
+  ...replayMessages,
   "common.cancel": "취소",
   "common.save": "저장",
   "common.close": "닫기",

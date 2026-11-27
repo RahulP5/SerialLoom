@@ -1,6 +1,7 @@
-import type { Messages } from "./en";
+import { replayMessages, type Messages } from "./en";
 
 export const ru: Messages = {
+  ...replayMessages,
   "common.cancel": "Отмена",
   "common.save": "Сохранить",
   "common.close": "Закрыть",

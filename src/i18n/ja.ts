@@ -1,6 +1,7 @@
-import type { Messages } from "./en";
+import { replayMessages, type Messages } from "./en";
 
 export const ja: Messages = {
+  ...replayMessages,
   "common.cancel": "キャンセル",
   "common.save": "保存",
   "common.close": "閉じる",

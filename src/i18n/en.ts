@@ -10,7 +10,34 @@
 
 export type Message = string | { zero?: string; one?: string; two?: string; few?: string; many?: string; other: string };
 
+export const replayMessages = {
+  "kind.gps": "GPS simulation",
+  "kind.replay": "Replay source",
+  "editor.file": "File",
+  "editor.nmea0183": "NMEA 0183",
+  "editor.nmea2000": "NMEA 2000 (Actisense)",
+  "editor.gps0183": "NMEA 0183 simulator",
+  "editor.gps2000": "NMEA 2000 simulator",
+  "replay.format": "File format",
+  "replay.raw": "Raw bytes",
+  "gps.latitude": "Start latitude (°)",
+  "gps.longitude": "Start longitude (°)",
+  "gps.course": "True course (°)",
+  "gps.speed": "Speed (kn)",
+  "replay.path": "Absolute file path",
+  "replay.browse": "Browse",
+  "replay.repeat": "Loop playback",
+  "replay.timestamped": "Use capture timestamps",
+  "replay.rate": "Bytes per second",
+  "replay.loopGap": "Loop gap (ms)",
+  "replay.cycle": "Cycle (ms)",
+  "replay.lines": "Sentences per cycle",
+  "replay.hexFormat": "One record per line: milliseconds, tab, Actisense bytes in hex.",
+  "replay.textFormat": "One record per line: milliseconds, tab, NMEA sentence.",
+};
+
 export const en = {
+  ...replayMessages,
   // Shared
   "common.cancel": "Cancel",
   "common.save": "Save",

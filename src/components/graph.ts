@@ -26,6 +26,14 @@ export interface HubNodeData extends Record<string, unknown> {
   totalRate: number;
 }
 
+export interface TraceLink {
+  id: string;
+  index: number;
+  source: string;
+  target: string;
+  forwardRx: boolean;
+}
+
 export interface TrafficEdgeData extends Record<string, unknown> {
   /** Bytes/s flowing source → target. */
   forward: number;
@@ -34,6 +42,7 @@ export interface TrafficEdgeData extends Record<string, unknown> {
   color: string;
   running: boolean;
   dashed?: boolean;
+  trace?: TraceLink;
   label?: string;
 }
 
@@ -66,7 +75,7 @@ export function buildGraph(
   const nodes: GraphNode[] = [];
   const edges: Edge[] = [];
   const tcpServers = new Map<string, { id: string; connected: boolean }[]>();
-  const tcpClients: { id: string; address: string; isMaster: boolean; connected: boolean; rate: Rate }[] = [];
+  const tcpClients: { id: string; address: string; isMaster: boolean; connected: boolean; rate: Rate; trace: TraceLink }[] = [];
   let y = 0;
 
   for (const hub of hubs) {
@@ -111,7 +120,9 @@ export function buildGraph(
     });
     spec.members.forEach((m, j) => nodes.push(epNode(m, j + 1, X_MEMBER, y + j * ROW)));
 
-    all.forEach(({ spec: endpoint }, i) => {
+    all.forEach((entry, i) => {
+      const endpoint = entry.spec;
+      const title = endpointTitle(entry);
       const id = `${spec.id}:${i}`;
       const r = hubRates[i] ?? { rx: 0, tx: 0 };
       const connected = status.running && status.endpoints[i]?.connected === true;
@@ -125,6 +136,7 @@ export function buildGraph(
       } else if (endpoint.kind === "tcpClient") {
         tcpClients.push({
           id, address: endpoint.address.trim().toLowerCase(), isMaster: i === 0, connected, rate: r,
+          trace: { id: spec.id, index: i, source: "", target: title, forwardRx: true },
         });
       }
 
@@ -138,6 +150,12 @@ export function buildGraph(
         targetHandle: "l",
         // Source → target is "into the hub" for the master, "out to the port" for members.
         data: {
+          trace: {
+            id: spec.id, index: i,
+            source: isMaster ? title : spec.name,
+            target: isMaster ? spec.name : title,
+            forwardRx: isMaster,
+          },
           forward: isMaster ? r.rx : r.tx,
           backward: isMaster ? r.tx : r.rx,
           color,
@@ -150,7 +168,7 @@ export function buildGraph(
   }
 
   // TCP links represent configured targets, even when either connection is stopped.
-  for (const { id, address, isMaster, connected, rate } of tcpClients) {
+  for (const { id, address, isMaster, connected, rate, trace } of tcpClients) {
     const servers = tcpServers.get(address);
     if (servers?.length !== 1) continue;
     const [server] = servers;
@@ -171,6 +189,7 @@ export function buildGraph(
         color: "#34d399",
         running: server.connected && connected,
         dashed: true,
+        trace: { ...trace, source: address },
       },
     });
   }

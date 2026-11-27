@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::{Condvar, Mutex};
 
+use crate::capture::{self, Capture, CaptureAction, CaptureStatus, Direction};
 use crate::driver::{ControlChannel, PortDriver};
 use crate::model::{
     EndpointSpec, EndpointStatus, FlowControl, HubKind, HubSpec, LineStatus, MonitorRecord, Parity,
@@ -205,6 +206,7 @@ struct Shared {
     outboxes: Vec<Outbox>,
     counters: Vec<Counters>,
     monitor: Mutex<Monitor>,
+    captures: Vec<Mutex<Option<Capture>>>,
 }
 
 impl Shared {
@@ -224,6 +226,7 @@ impl Shared {
         let n = data.len() as u64;
         self.counters[src].rx.fetch_add(n, Ordering::Relaxed);
         self.monitor.lock().push(src, data);
+        self.record(src, Direction::Rx, data);
 
         let hold = self.holdable[src];
         let mut payload = None;
@@ -246,6 +249,12 @@ impl Shared {
                 state.bytes += data.len();
                 outbox.ready.notify_one();
             }
+        }
+    }
+
+    fn record(&self, idx: usize, direction: Direction, data: &[u8]) {
+        if let Some(capture) = self.captures[idx].lock().as_ref() {
+            capture.record(direction, data);
         }
     }
 
@@ -273,16 +282,16 @@ impl Shared {
         };
 
         let (written, dropped, error) = match &mut *writer.lock() {
-            Writer::Udp(writer) => writer.send(source, &data),
+            Writer::Udp(writer) => writer.send(source, &data, |bytes| self.record(idx, Direction::Tx, bytes)),
             writer => {
-                let (written, error) = write_with_deadline(writer, &data, hold);
+                let (written, error) = write_with_deadline(writer, &data, hold, |bytes| {
+                    self.record(idx, Direction::Tx, bytes)
+                });
                 (written, data.len() - written, error)
             }
         };
         counters.tx.fetch_add(written as u64, Ordering::Relaxed);
-        counters
-            .dropped
-            .fetch_add(dropped as u64, Ordering::Relaxed);
+        counters.dropped.fetch_add(dropped as u64, Ordering::Relaxed);
         let state = outbox.state.lock();
         // An in-flight write belongs to the old connection if the reader replaced it.
         if state
@@ -360,7 +369,12 @@ fn is_transient(e: &io::Error) -> bool {
     )
 }
 
-fn write_with_deadline(w: &mut Writer, mut data: &[u8], hold: bool) -> (usize, Option<io::Error>) {
+fn write_with_deadline(
+    w: &mut Writer,
+    mut data: &[u8],
+    hold: bool,
+    mut sent: impl FnMut(&[u8]),
+) -> (usize, Option<io::Error>) {
     let len = data.len();
     let deadline = Instant::now() + WRITE_DEADLINE;
     let error = loop {
@@ -374,7 +388,10 @@ fn write_with_deadline(w: &mut Writer, mut data: &[u8], hold: bool) -> (usize, O
                     "endpoint accepted no data",
                 ));
             }
-            Ok(n) => data = &data[n..],
+            Ok(n) => {
+                sent(&data[..n]);
+                data = &data[n..];
+            }
             Err(e) if is_transient(&e) && Instant::now() < deadline => {}
             Err(e) => break Some(e),
         }
@@ -390,6 +407,14 @@ pub struct HubRuntime {
 
 impl HubRuntime {
     pub fn start(spec: &HubSpec, driver: Arc<dyn PortDriver>) -> Self {
+        Self::start_with_captures(spec, driver, Default::default())
+    }
+
+    pub(crate) fn start_with_captures(
+        spec: &HubSpec,
+        driver: Arc<dyn PortDriver>,
+        mut armed: std::collections::HashMap<usize, Capture>,
+    ) -> Self {
         let endpoints: Vec<EndpointSpec> = spec.endpoints().map(|e| e.spec.clone()).collect();
         let count = endpoints.len();
         let shared = Arc::new(Shared {
@@ -400,11 +425,14 @@ impl HubRuntime {
                     .iter()
                     .all(|e| matches!(e, EndpointSpec::Virtual { .. })),
             stop: AtomicBool::new(false),
-            sources_only: endpoints.iter().map(|ep| match ep {
-                EndpointSpec::Replay { .. } => true,
-                EndpointSpec::Udp { settings } => settings.destination.trim().is_empty(),
-                _ => false,
-            }).collect(),
+            sources_only: endpoints
+                .iter()
+                .map(|ep| match ep {
+                    EndpointSpec::Replay { .. } => true,
+                    EndpointSpec::Udp { settings } => settings.destination.trim().is_empty(),
+                    _ => false,
+                })
+                .collect(),
             holdable: endpoints
                 .iter()
                 .map(|e| !matches!(e, EndpointSpec::Serial { .. }))
@@ -412,6 +440,7 @@ impl HubRuntime {
             outboxes: (0..count).map(|_| Outbox::default()).collect(),
             counters: (0..count).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
+            captures: (0..count).map(|index| Mutex::new(armed.remove(&index))).collect(),
         });
 
         let mut threads = Vec::with_capacity(2 * count);
@@ -445,6 +474,42 @@ impl HubRuntime {
         self.shared.counters.iter().map(Counters::snapshot).collect()
     }
 
+    pub fn capture(&self, index: usize, action: CaptureAction) -> crate::Result<CaptureStatus> {
+        let slot = self
+            .shared
+            .captures
+            .get(index)
+            .ok_or_else(|| crate::Error::Invalid("invalid capture endpoint".into()))?;
+        let include_records = !matches!(action, CaptureAction::Summary);
+        match action {
+            CaptureAction::Start(request) => {
+                {
+                    let current = slot.lock();
+                    if current.as_ref().is_some_and(Capture::running) {
+                        return Err(crate::Error::Invalid(
+                            "a capture is already running on this endpoint".into(),
+                        ));
+                    }
+                }
+                // File creation and free space checks take place outside the routing lock.
+                let capture = Capture::start(request)?;
+                *slot.lock() = Some(capture);
+            }
+            CaptureAction::Stop => {
+                if let Some(capture) = slot.lock().as_ref() {
+                    capture.stop();
+                }
+            }
+            CaptureAction::CloseWindow => {
+                if let Some(capture) = slot.lock().as_ref().filter(|capture| !capture.is_file()) {
+                    capture.stop();
+                }
+            }
+            CaptureAction::Status | CaptureAction::Summary => {}
+        }
+        Ok(capture::status(slot.lock().as_ref(), include_records))
+    }
+
     /// Traffic records with `seq > after` (at most the newest 500).
     pub fn monitor_since(&self, after: u64) -> Vec<MonitorRecord> {
         self.shared.monitor.lock().since(after)
@@ -472,10 +537,14 @@ fn run_endpoint(idx: usize, spec: EndpointSpec, driver: &Arc<dyn PortDriver>, sh
         EndpointSpec::Udp { settings } => udp_loop(idx, settings, &shared),
         EndpointSpec::Replay { settings } => {
             let counters = &shared.counters[idx];
-            let result = crate::replay::run(settings, || shared.stopped(), |data| {
-                counters.connected.store(true, Ordering::Relaxed);
-                shared.route(idx, data);
-            });
+            let result = crate::replay::run(
+                settings,
+                || shared.stopped(),
+                |data| {
+                    counters.connected.store(true, Ordering::Relaxed);
+                    shared.route(idx, data);
+                },
+            );
             if let Err(error) = result {
                 counters.set_error(format!("replay failed: {error}"));
             }
@@ -981,6 +1050,7 @@ mod tests {
             outboxes: (0..n).map(|_| Outbox::default()).collect(),
             counters: (0..n).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
+            captures: (0..n).map(|_| Mutex::new(None)).collect(),
         }
     }
 

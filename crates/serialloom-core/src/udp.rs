@@ -60,7 +60,12 @@ impl UdpWriter {
     }
 
     /// Returns bytes sent, bytes discarded, and the most recent send error.
-    pub(crate) fn send(&mut self, source: usize, data: &[u8]) -> (usize, usize, Option<io::Error>) {
+    pub(crate) fn send(
+        &mut self,
+        source: usize,
+        data: &[u8],
+        mut sent: impl FnMut(&[u8]),
+    ) -> (usize, usize, Option<io::Error>) {
         let mut written = 0;
         let mut dropped = 0;
         let mut error = None;
@@ -68,6 +73,7 @@ impl UdpWriter {
         let destination = self.destination;
         let mut send = |bytes: &[u8]| match socket.send_to(bytes, destination) {
             Ok(count) => {
+                sent(&bytes[..count]);
                 written += count;
                 dropped += bytes.len() - count;
             }
@@ -120,16 +126,20 @@ mod tests {
         let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
         let mut writer = UdpWriter::new(sender, receiver.local_addr().unwrap(), UdpFraming::Raw);
         let mut buf = [0; 1024];
-        let n = writer.send(0, b"\x00\xFF").0;
+        let n = writer.send(0, b"\x00\xFF", |_| {}).0;
         assert_eq!(n, 2);
         let (n, _) = receiver.recv_from(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"\x00\xFF");
 
         writer.framing = UdpFraming::Nmea0183;
-        assert_eq!(writer.send(0, b"$GP").0, 0);
-        writer.send(1, b"!AIS\r\n");
-        writer.send(0, b"RMC\r\n$GPGGA\r\n");
-        for expected in [&b"!AIS\r\n"[..], &b"$GPRMC\r\n"[..], &b"$GPGGA\r\n"[..]] {
+        let mut captured = Vec::new();
+        let mut sent = |bytes: &[u8]| captured.push(bytes.to_vec());
+        assert_eq!(writer.send(0, b"$GP", &mut sent).0, 0);
+        writer.send(1, b"!AIS\r\n", &mut sent);
+        writer.send(0, b"RMC\r\n$GPGGA\r\n", sent);
+        let expected = [&b"!AIS\r\n"[..], &b"$GPRMC\r\n"[..], &b"$GPGGA\r\n"[..]];
+        assert_eq!(captured, expected);
+        for expected in expected {
             let (n, _) = receiver.recv_from(&mut buf).unwrap();
             assert_eq!(&buf[..n], expected);
         }

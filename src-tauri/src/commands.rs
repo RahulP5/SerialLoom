@@ -8,7 +8,7 @@ use serde::Serialize;
 use serialloom_core::config::{AppSettings, save_json};
 use serialloom_core::model::*;
 use serialloom_core::{Engine, Result as CoreResult};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::AppState;
@@ -204,6 +204,67 @@ pub async fn remove_member(
     remove_virtual_port: bool,
 ) -> CmdResult<HubView> {
     blocking(&state, move |e| e.remove_member(&id, index, remove_virtual_port)).await
+}
+
+#[tauri::command]
+pub async fn open_trace_window(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    index: usize,
+    source: String,
+    target: String,
+    forward_rx: bool,
+    file_mode: bool,
+) -> CmdResult<()> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
+    let mut hash = DefaultHasher::new();
+    (&id, index).hash(&mut hash);
+    let label = format!("trace-{:016x}", hash.finish());
+    if let Some(window) = app.get_webview_window(&label) {
+        window.unminimize().map_err(|error| error.to_string())?;
+        return window.set_focus().map_err(|error| error.to_string());
+    }
+
+    let options = serde_json::json!({
+        "id": id, "index": index, "source": source, "target": target,
+        "forwardRx": forward_rx, "fileMode": file_mode,
+    });
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("main window is unavailable")?;
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
+        .parent(&parent)
+        .map_err(|error| error.to_string())?
+        .title("SerialLoom — Trace")
+        .inner_size(1050.0, 700.0)
+        .min_inner_size(600.0, 440.0)
+        .initialization_script(format!("window.__SERIALLOOM_TRACE__ = {options};"))
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    let engine = Arc::clone(&state.engine);
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            let engine = Arc::clone(&engine);
+            let id = id.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let _ = engine.capture_link(&id, index, serialloom_core::capture::CaptureAction::CloseWindow);
+            });
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn capture_link(
+    state: State<'_, AppState>,
+    id: String,
+    index: usize,
+    action: serialloom_core::capture::CaptureAction,
+) -> CmdResult<serialloom_core::capture::CaptureStatus> {
+    blocking(&state, move |e| e.capture_link(&id, index, action)).await
 }
 
 #[tauri::command]

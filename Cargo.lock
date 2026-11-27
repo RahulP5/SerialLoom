@@ -3183,6 +3183,8 @@ dependencies = [
 name = "serialloom-core"
 version = "0.4.2"
 dependencies = [
+ "chrono",
+ "libc",
  "parking_lot",
  "serde",
  "serde_json",

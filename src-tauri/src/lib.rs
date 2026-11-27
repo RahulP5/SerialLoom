@@ -132,6 +132,8 @@ pub fn run() {
             commands::add_member,
             commands::remove_member,
             commands::hub_monitor,
+            commands::open_trace_window,
+            commands::capture_link,
             commands::automation_info,
             commands::helper_status,
             commands::install_helper,

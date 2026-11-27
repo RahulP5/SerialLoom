@@ -95,8 +95,11 @@ export function hubDescription(kind: HubKind): string {
   return t(`hub.${kind}.describe`);
 }
 
-export function hex(bytes: number[]): string {
-  return bytes.map((b) => b.toString(16).padStart(2, "0")).join(" ");
+export function hex(bytes: number[], prefixed = false): string {
+  return bytes.map((byte) => {
+    const value = byte.toString(16).padStart(2, "0");
+    return prefixed ? `0x${value.toUpperCase()}` : value;
+  }).join(" ");
 }
 
 export function ascii(bytes: number[]): string {

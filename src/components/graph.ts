@@ -1,9 +1,10 @@
 import type { Edge, Node } from "@xyflow/react";
 import type { Rate } from "../store";
 import type { EndpointStatus, HubEndpoint, HubView, PortInfo, PortKind } from "../lib/types";
+import { isGps } from "../lib/types";
 import { endpointSubtitle, endpointTitle, HUB_COLOR } from "../lib/format";
 
-export type EndpointIcon = PortKind | "tcp";
+export type EndpointIcon = PortKind | "tcp" | "replay" | "gps";
 
 export interface EndpointNodeData extends Record<string, unknown> {
   title: string;
@@ -48,6 +49,7 @@ const ROW = 104;
 const GAP = 72;
 
 function iconFor(e: HubEndpoint, ports: PortInfo[]): EndpointIcon {
+  if (e.spec.kind === "replay") return isGps(e.spec.settings.format) ? "gps" : "replay";
   if (e.spec.kind === "virtual") return "virtual";
   if (e.spec.kind !== "serial") return "tcp";
   const name = e.spec.port.toUpperCase();

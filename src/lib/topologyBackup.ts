@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import { api, errorText, inTauri } from "./api";
 import { HUB_KINDS } from "./format";
-import type { CreateHubRequest, EndpointSpec, HubKind, HubSpec } from "./types";
+import { REPLAY_FORMATS, isGps } from "./types";
+import type { ReplayFormat, CreateHubRequest, EndpointSpec, HubKind, HubSpec } from "./types";
 
 type Position = { x: number; y: number };
 type SavedHub = Omit<CreateHubRequest, "start" | "master" | "members"> & {
@@ -69,6 +70,38 @@ function endpoint(value: unknown): EndpointSpec {
     case "virtual": return { kind: e.kind, port: comName(e.port) };
     case "tcpServer": return { kind: e.kind, bind: textValue(e.bind) };
     case "tcpClient": return { kind: e.kind, address: textValue(e.address) };
+    case "replay": {
+      const settings = record(e.settings);
+      const { format, repeat, timestamped, bytesPerSecond, cycleMs, linesPerCycle } = settings;
+      if (!REPLAY_FORMATS.includes(format as ReplayFormat) ||
+          typeof repeat !== "boolean" || typeof timestamped !== "boolean" ||
+          (format === "file" && timestamped)) return invalid();
+      const rate = (value: unknown, max: number): number => {
+        if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > max) return invalid();
+        return value;
+      };
+      const simulation = isGps(format as ReplayFormat);
+      let gps;
+      if (simulation) {
+        const config = record(settings.gps);
+        const field = (key: string, min: number, max: number) => {
+          const value = textValue(config[key]);
+          const number = Number(value);
+          if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value) ||
+              !Number.isFinite(number) || number < min || number > max) return invalid();
+          return value;
+        };
+        gps = { latitude: field("latitude", -90, 90), longitude: field("longitude", -180, 180),
+          course: field("course", 0, 360), speed: field("speed", 0, 100) };
+      }
+      return { kind: e.kind, settings: {
+        path: simulation ? "" : textValue(settings.path), format: format as ReplayFormat, repeat, timestamped,
+        ...(gps ? { gps } : {}),
+        bytesPerSecond: rate(bytesPerSecond, 1_000_000),
+        cycleMs: rate(cycleMs, 60_000),
+        linesPerCycle: rate(linesPerCycle, 256),
+      } };
+    }
     case "serial": {
       const s = record(e.settings);
       const { baudRate, dataBits, parity, stopBits, flowControl } = s;

@@ -78,6 +78,8 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(windows)]
                 topology_menu::install(&window);
+                #[cfg(debug_assertions)]
+                let _ = window.set_title("SerialLoom [DEV]");
                 fit_to_work_area(&window);
                 // The window starts hidden (tauri.conf.json) so a background
                 // start never flashes it.

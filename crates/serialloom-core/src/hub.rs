@@ -199,6 +199,7 @@ struct Shared {
     /// Not a real serial port: its device keeps sending (SerialLoom opens
     /// it with RTS on, so even RTS/CTS flow control does not pause it).
     holdable: Vec<bool>,
+    sources_only: Vec<bool>,
     outboxes: Vec<Outbox>,
     counters: Vec<Counters>,
     monitor: Mutex<Monitor>,
@@ -225,6 +226,9 @@ impl Shared {
         let hold = self.holdable[src];
         let mut payload = None;
         for target in route_targets(self.kind, self.outboxes.len(), src) {
+            if self.sources_only[target] {
+                continue;
+            }
             let counters = &self.counters[target];
             let outbox = &self.outboxes[target];
             let mut state = outbox.state.lock();
@@ -387,6 +391,7 @@ impl HubRuntime {
                     .iter()
                     .all(|e| matches!(e, EndpointSpec::Virtual { .. })),
             stop: AtomicBool::new(false),
+            sources_only: endpoints.iter().map(|ep| matches!(ep, EndpointSpec::Replay { .. })).collect(),
             holdable: endpoints
                 .iter()
                 .map(|e| !matches!(e, EndpointSpec::Serial { .. }))
@@ -451,6 +456,16 @@ fn run_endpoint(idx: usize, spec: EndpointSpec, driver: &Arc<dyn PortDriver>, sh
         EndpointSpec::Serial { port, settings } => serial_loop(idx, port, settings, &shared),
         EndpointSpec::TcpServer { bind } => tcp_server_loop(idx, bind, &shared),
         EndpointSpec::TcpClient { address } => tcp_client_loop(idx, address, &shared),
+        EndpointSpec::Replay { settings } => {
+            let counters = &shared.counters[idx];
+            let result = crate::replay::run(settings, || shared.stopped(), |data| {
+                counters.connected.store(true, Ordering::Relaxed);
+                shared.route(idx, data);
+            });
+            if let Err(error) = result {
+                counters.set_error(format!("replay failed: {error}"));
+            }
+        }
         EndpointSpec::Virtual { port } => virtual_loop(idx, port, driver.as_ref(), &shared),
     }
     shared.detach(idx);
@@ -849,6 +864,7 @@ mod tests {
             null_modem: false,
             stop: AtomicBool::new(false),
             holdable,
+            sources_only: vec![false; n],
             outboxes: (0..n).map(|_| Outbox::default()).collect(),
             counters: (0..n).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),

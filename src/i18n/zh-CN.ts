@@ -1,6 +1,7 @@
-import type { Messages } from "./en";
+import { replayMessages, type Messages } from "./en";
 
 export const zhCN: Messages = {
+  ...replayMessages,
   "common.cancel": "取消",
   "common.save": "保存",
   "common.close": "关闭",

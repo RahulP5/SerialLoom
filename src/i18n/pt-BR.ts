@@ -1,6 +1,7 @@
-import type { Messages } from "./en";
+import { replayMessages, type Messages } from "./en";
 
 export const ptBR: Messages = {
+  ...replayMessages,
   "common.cancel": "Cancelar",
   "common.save": "Salvar",
   "common.close": "Fechar",

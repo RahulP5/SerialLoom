@@ -31,6 +31,8 @@ export function specTitle(s: EndpointSpec | EndpointRequest): string {
       return `:${s.bind.split(":").pop()}`;
     case "tcpClient":
       return s.address;
+    case "udp":
+      return s.settings.receive ? s.settings.bind : s.settings.destination;
     case "replay":
       return s.settings.path.split(/[\\/]/).pop() || t(`editor.${s.settings.format}`);
     case "newVirtual":
@@ -67,6 +69,8 @@ export function endpointSubtitle(e: HubEndpoint, running: boolean, status?: Endp
       return running ? t("endpoint.listen", { bind: s.bind }) : `${t("common.stopped")} · ${s.bind}`;
     case "tcpClient":
       return t("endpoint.tcpClient");
+    case "udp":
+      return s.settings.destination ? `UDP → ${s.settings.destination}` : "UDP";
     case "replay":
       return t(`editor.${s.settings.format}`);
   }

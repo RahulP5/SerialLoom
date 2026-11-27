@@ -1,6 +1,11 @@
 import type { Messages } from "./en";
 
 export const fr = {
+  "editor.udp": "UDP",
+  "udp.local": "IP et port locaux",
+  "udp.receive": "Recevoir",
+  "udp.destination": "IP et port de destination (facultatif)",
+  "udp.framing": "Format de sortie",
   "kind.gps": "Simulation GPS",
   "kind.replay": "Source de rejeu",
   "editor.file": "Fichier",

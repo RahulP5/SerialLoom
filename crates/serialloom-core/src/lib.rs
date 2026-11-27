@@ -26,6 +26,7 @@ pub mod logging;
 pub mod model;
 pub mod ports;
 mod replay;
+mod udp;
 pub mod usbip;
 #[cfg(windows)]
 pub mod winpipe;

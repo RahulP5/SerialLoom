@@ -5,7 +5,7 @@
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
@@ -35,6 +35,7 @@ enum Writer {
     Stream(Box<dyn Write + Send>),
     /// A SerialLoom virtual port.
     Channel(Arc<dyn ControlChannel>),
+    Udp(crate::udp::UdpWriter),
 }
 
 impl Writer {
@@ -44,6 +45,7 @@ impl Writer {
     fn write(&mut self, data: &[u8], hold: bool) -> io::Result<usize> {
         match self {
             Writer::Stream(w) => w.write(data),
+            Writer::Udp(_) => unreachable!("UDP writes use datagram framing"),
             Writer::Channel(c) if hold => c.write(data),
             Writer::Channel(c) => c.write_now(data),
         }
@@ -164,7 +166,7 @@ type AttachedWriter = Arc<Mutex<Writer>>;
 struct OutboxState {
     writer: Option<AttachedWriter>,
     channel: Option<Arc<dyn ControlChannel>>,
-    pending: VecDeque<(Arc<[u8]>, bool)>,
+    pending: VecDeque<(Arc<[u8]>, bool, usize)>,
     bytes: usize,
 }
 
@@ -240,7 +242,7 @@ impl Shared {
                 counters.warn_full_outbox();
             } else {
                 let payload = payload.get_or_insert_with(|| Arc::<[u8]>::from(data));
-                state.pending.push_back((Arc::clone(payload), hold));
+                state.pending.push_back((Arc::clone(payload), hold, src));
                 state.bytes += data.len();
                 outbox.ready.notify_one();
             }
@@ -250,7 +252,7 @@ impl Shared {
     fn write_next(&self, idx: usize, wait: bool) -> bool {
         let outbox = &self.outboxes[idx];
         let counters = &self.counters[idx];
-        let (writer, data, hold) = {
+        let (writer, data, hold, source) = {
             let mut state = outbox.state.lock();
             while wait && !self.stopped() && state.pending.is_empty() {
                 outbox.ready.wait(&mut state);
@@ -258,7 +260,7 @@ impl Shared {
             if self.stopped() {
                 return false;
             }
-            let Some((data, hold)) = state.pending.pop_front() else {
+            let Some((data, hold, source)) = state.pending.pop_front() else {
                 return false;
             };
             state.bytes -= data.len();
@@ -266,14 +268,21 @@ impl Shared {
                 Arc::clone(state.writer.as_ref().expect("queued data requires a writer")),
                 data,
                 hold,
+                source,
             )
         };
 
-        let (written, error) = write_with_deadline(&mut writer.lock(), &data, hold);
+        let (written, dropped, error) = match &mut *writer.lock() {
+            Writer::Udp(writer) => writer.send(source, &data),
+            writer => {
+                let (written, error) = write_with_deadline(writer, &data, hold);
+                (written, data.len() - written, error)
+            }
+        };
         counters.tx.fetch_add(written as u64, Ordering::Relaxed);
         counters
             .dropped
-            .fetch_add((data.len() - written) as u64, Ordering::Relaxed);
+            .fetch_add(dropped as u64, Ordering::Relaxed);
         let state = outbox.state.lock();
         // An in-flight write belongs to the old connection if the reader replaced it.
         if state
@@ -391,7 +400,11 @@ impl HubRuntime {
                     .iter()
                     .all(|e| matches!(e, EndpointSpec::Virtual { .. })),
             stop: AtomicBool::new(false),
-            sources_only: endpoints.iter().map(|ep| matches!(ep, EndpointSpec::Replay { .. })).collect(),
+            sources_only: endpoints.iter().map(|ep| match ep {
+                EndpointSpec::Replay { .. } => true,
+                EndpointSpec::Udp { settings } => settings.destination.trim().is_empty(),
+                _ => false,
+            }).collect(),
             holdable: endpoints
                 .iter()
                 .map(|e| !matches!(e, EndpointSpec::Serial { .. }))
@@ -456,6 +469,7 @@ fn run_endpoint(idx: usize, spec: EndpointSpec, driver: &Arc<dyn PortDriver>, sh
         EndpointSpec::Serial { port, settings } => serial_loop(idx, port, settings, &shared),
         EndpointSpec::TcpServer { bind } => tcp_server_loop(idx, bind, &shared),
         EndpointSpec::TcpClient { address } => tcp_client_loop(idx, address, &shared),
+        EndpointSpec::Udp { settings } => udp_loop(idx, settings, &shared),
         EndpointSpec::Replay { settings } => {
             let counters = &shared.counters[idx];
             let result = crate::replay::run(settings, || shared.stopped(), |data| {
@@ -732,6 +746,62 @@ fn tcp_client_loop(idx: usize, address: &str, sh: &Shared) {
     }
 }
 
+fn udp_loop(idx: usize, settings: &crate::model::UdpSettings, sh: &Shared) {
+    let counters = &sh.counters[idx];
+    let (bind, destination) = match crate::udp::addresses(settings) {
+        Ok(addresses) => addresses,
+        Err(error) => {
+            counters.set_error(error.to_string());
+            return;
+        }
+    };
+
+    let mut buffer = vec![0; 65_536];
+    while !sh.stopped() {
+        let setup = (|| {
+            let socket = UdpSocket::bind(bind)?;
+            socket.set_read_timeout(Some(READ_TIMEOUT))?;
+            if let Some(destination) = destination {
+                if destination.is_ipv4() {
+                    socket.set_broadcast(true)?;
+                }
+                socket.set_write_timeout(Some(READ_TIMEOUT))?;
+                let writer = crate::udp::UdpWriter::new(socket.try_clone()?, destination, settings.framing);
+                sh.attach(idx, Writer::Udp(writer));
+            } else {
+                counters.clear_error();
+                counters.connected.store(true, Ordering::Relaxed);
+            }
+            Ok::<_, io::Error>(socket)
+        })();
+
+        match setup {
+            Ok(socket) => {
+                while !sh.stopped() {
+                    match socket.recv_from(&mut buffer) {
+                        Ok((count, _)) if settings.receive && count > 0 => sh.route(idx, &buffer[..count]),
+                        Ok(_) => {}
+                        Err(error) if is_transient(&error) => {}
+                        Err(error) => {
+                            // Winsock reports ICMP Port Unreachable on the next receive.
+                            if cfg!(windows) && error.raw_os_error() == Some(10054) {
+                                continue;
+                            }
+                            counters.set_error(format!("UDP receive failed on {bind}: {error}"));
+                            break;
+                        }
+                    }
+                }
+                sh.detach(idx);
+            }
+            Err(error) => counters.set_error(format!("cannot open UDP socket on {bind}: {error}")),
+        }
+        if !sh.stopped() {
+            sh.sleep(RETRY_DELAY);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -769,6 +839,49 @@ mod tests {
             assert!(Instant::now() < deadline, "endpoints did not connect");
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn bridge_forwards_bytes_between_tcp_and_udp() {
+        let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let port = free_port();
+        let local = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = local.local_addr().unwrap();
+        drop(local);
+
+        let spec = HubSpec {
+            id: "udp-test".into(),
+            name: "UDP test".into(),
+            kind: HubKind::Bridge,
+            master: ep(EndpointSpec::TcpServer {
+                bind: format!("127.0.0.1:{port}"),
+            }),
+            members: vec![ep(EndpointSpec::Udp {
+                settings: crate::model::UdpSettings {
+                    bind: address.to_string(),
+                    destination: peer.local_addr().unwrap().to_string(),
+                    receive: true,
+                    framing: crate::model::UdpFraming::Raw,
+                },
+            })],
+            autostart: false,
+        };
+        let hub = HubRuntime::start(&spec, Arc::new(crate::driver::demo::DemoDriver::new()));
+        let mut tcp = connect(port);
+        wait_connected(&hub, 2);
+        let mut buffer = [0; 3];
+        tcp.write_all(b"\0\xFFx").unwrap();
+        let mut received = Vec::new();
+        while received.len() < buffer.len() {
+            let (count, source) = peer.recv_from(&mut buffer).unwrap();
+            assert_eq!(source, address);
+            received.extend_from_slice(&buffer[..count]);
+        }
+        assert_eq!(received, b"\0\xFFx");
+        peer.send_to(b"ack", address).unwrap();
+        tcp.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"ack");
     }
 
     /// A split hub built from TCP servers: master data reaches every member,

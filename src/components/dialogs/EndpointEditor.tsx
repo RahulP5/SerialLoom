@@ -16,7 +16,7 @@ export function replaySource(format: ReplayFormat): EndpointRequest {
   } };
 }
 
-const KINDS: Kind[] = ["newVirtual", "virtual", "serial", "tcpServer", "tcpClient", ...SOURCE_FORMATS];
+const KINDS: Kind[] = ["newVirtual", "virtual", "serial", "tcpServer", "tcpClient", "udp", ...SOURCE_FORMATS];
 
 export function defaultFor(kind: Kind, firstFree?: string): EndpointRequest {
   switch (kind) {
@@ -34,6 +34,8 @@ export function defaultFor(kind: Kind, firstFree?: string): EndpointRequest {
       return { kind, bind: "0.0.0.0:7000" };
     case "tcpClient":
       return { kind, address: "192.168.1.20:4001" };
+    case "udp":
+      return { kind, settings: { bind: "127.0.0.1:10110", destination: "", receive: true, framing: "raw" } };
   }
 }
 
@@ -118,6 +120,36 @@ export function EndpointEditor({
           </button>
         )}
       </div>
+      {value.kind === "udp" && (
+        <div className="mt-2 flex flex-wrap gap-3">
+          <label className="flex items-center gap-2 text-xs">
+            {t("udp.local")}
+            <input className="input w-44 font-mono" value={value.settings.bind} placeholder="127.0.0.1:10110"
+              spellCheck={false} onChange={(e) => onChange({ ...value, settings: { ...value.settings, bind: e.target.value } })} />
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={value.settings.receive}
+              onChange={(e) => onChange({ ...value, settings: { ...value.settings, receive: e.target.checked } })} />
+            {t("udp.receive")}
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            {t("udp.destination")}
+            <input className="input w-44 font-mono" value={value.settings.destination} placeholder="127.0.0.1:10110"
+              spellCheck={false} onChange={(e) => onChange({ ...value, settings: { ...value.settings, destination: e.target.value } })} />
+          </label>
+          {!!value.settings.destination.trim() && (
+            <label className="flex items-center gap-2 text-xs">
+              {t("udp.framing")}
+              <select className="input w-auto" value={value.settings.framing}
+                onChange={(e) => onChange({ ...value, settings: { ...value.settings,
+                  framing: e.target.value === "nmea0183" ? "nmea0183" : "raw" } })}>
+                <option value="raw">{t("replay.raw")}</option>
+                <option value="nmea0183">{t("editor.nmea0183")}</option>
+              </select>
+            </label>
+          )}
+        </div>
+      )}
       {value.kind === "replay" && (
         <ReplaySettingsRow value={value.settings} onChange={(settings) => onChange({ kind: "replay", settings })} />
       )}

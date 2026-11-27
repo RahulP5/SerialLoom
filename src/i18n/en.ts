@@ -11,6 +11,11 @@
 export type Message = string | { zero?: string; one?: string; two?: string; few?: string; many?: string; other: string };
 
 export const replayMessages = {
+  "editor.udp": "UDP",
+  "udp.local": "Local IP and port",
+  "udp.receive": "Receive",
+  "udp.destination": "Destination IP and port (optional)",
+  "udp.framing": "Output framing",
   "kind.gps": "GPS simulation",
   "kind.replay": "Replay source",
   "editor.file": "File",

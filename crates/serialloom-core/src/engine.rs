@@ -459,6 +459,11 @@ impl Engine {
                         },
                         false,
                     ),
+                    EndpointRequest::Udp { mut settings } => {
+                        settings.bind = settings.bind.trim().into();
+                        settings.destination = settings.destination.trim().into();
+                        (EndpointSpec::Udp { settings }, false)
+                    }
                     EndpointRequest::Replay { mut settings } => {
                         settings.path = settings.path.trim().into();
                         (EndpointSpec::Replay { settings }, false)
@@ -570,6 +575,9 @@ fn validate_request(r: &EndpointRequest) -> Result<()> {
             .parse::<SocketAddr>()
             .map(|_| ())
             .map_err(|_| Error::Invalid(format!("'{bind}' is not a listen address such as 0.0.0.0:7000"))),
+        EndpointRequest::Udp { settings } => crate::udp::addresses(settings)
+            .map(|_| ())
+            .map_err(|error| Error::Invalid(error.to_string())),
         EndpointRequest::Replay { settings } => crate::replay::validate(settings)
             .map_err(|error| Error::Invalid(error.to_string())),
         EndpointRequest::TcpClient { address } => {

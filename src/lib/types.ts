@@ -33,11 +33,19 @@ export interface ReplaySettings {
   linesPerCycle: number;
 }
 
+export interface UdpSettings {
+  bind: string;
+  destination: string;
+  receive: boolean;
+  framing: "raw" | "nmea0183";
+}
+
 export type EndpointSpec =
   | { kind: "serial"; port: string; settings: SerialSettings }
   | { kind: "virtual"; port: string }
   | { kind: "tcpServer"; bind: string }
   | { kind: "tcpClient"; address: string }
+  | { kind: "udp"; settings: UdpSettings }
   | { kind: "replay"; settings: ReplaySettings };
 
 export type EndpointRequest = EndpointSpec | { kind: "newVirtual"; name: string };

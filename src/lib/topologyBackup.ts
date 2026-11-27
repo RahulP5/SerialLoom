@@ -70,6 +70,13 @@ function endpoint(value: unknown): EndpointSpec {
     case "virtual": return { kind: e.kind, port: comName(e.port) };
     case "tcpServer": return { kind: e.kind, bind: textValue(e.bind) };
     case "tcpClient": return { kind: e.kind, address: textValue(e.address) };
+    case "udp": {
+      const { bind, destination, receive, framing } = record(e.settings);
+      if (typeof destination !== "string" || typeof receive !== "boolean" ||
+          (framing !== "raw" && framing !== "nmea0183") ||
+          (!receive && !destination.trim())) return invalid();
+      return { kind: "udp", settings: { bind: textValue(bind), destination: destination.trim(), receive, framing } };
+    }
     case "replay": {
       const settings = record(e.settings);
       const { format, repeat, timestamped, bytesPerSecond, cycleMs, linesPerCycle } = settings;

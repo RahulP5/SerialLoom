@@ -186,6 +186,7 @@ mod windows {
         pub fn start(port: &str, request: CaptureRequest) -> io::Result<Self> {
             request.validate()?;
             // Prevent USBPcap from spawning its own elevated worker outside our lifecycle.
+            // SAFETY: IsUserAnAdmin takes no arguments and only reads the process token.
             if unsafe { windows_sys::Win32::UI::Shell::IsUserAnAdmin() } == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,

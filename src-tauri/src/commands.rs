@@ -206,6 +206,8 @@ pub async fn remove_member(
     blocking(&state, move |e| e.remove_member(&id, index, remove_virtual_port)).await
 }
 
+// The window passes each argument by name, so they stay separate.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn open_trace_window(
     app: AppHandle,
@@ -296,9 +298,10 @@ pub async fn capture_usb_probe(
                 }
                 CaptureAction::Status | CaptureAction::Summary => {}
             }
-            Ok(probes
-                .get(&id)
-                .map_or_else(|| serde_json::json!(CaptureStatus::idle()), |probe| probe.status()))
+            Ok(probes.get(&id).map_or_else(
+                || serde_json::json!(CaptureStatus::idle()),
+                |probe| probe.status(),
+            ))
         })
         .await
         .map_err(|error| error.to_string())?

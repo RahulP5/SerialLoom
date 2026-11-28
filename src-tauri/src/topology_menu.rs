@@ -1,7 +1,6 @@
 use tauri::{Emitter, WebviewWindow};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, ICoreWebView2_11, ICoreWebView2_2,
-    ICoreWebView2Environment9,
+    COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND, ICoreWebView2_2, ICoreWebView2_11, ICoreWebView2Environment9,
 };
 use webview2_com::{
     ContextMenuRequestedEventHandler, CustomItemSelectedEventHandler, ExecuteScriptCompletedHandler,
@@ -11,7 +10,9 @@ use windows_core::{HSTRING, Interface, PCWSTR};
 pub fn install(window: &WebviewWindow) {
     let target = window.clone();
     if let Err(error) = window.with_webview(move |platform| {
-        // Tauri runs this callback on the WebView2 UI thread.
+        // SAFETY: WebView2 COM calls on interfaces obtained from Tauri's live
+        // controller; Tauri runs this callback on the WebView2 UI thread, as
+        // these interfaces require.
         let result = unsafe {
             platform.controller().CoreWebView2().and_then(|webview| {
                 let environment: ICoreWebView2Environment9 =

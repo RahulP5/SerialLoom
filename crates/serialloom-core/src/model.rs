@@ -142,13 +142,23 @@ pub enum EndpointSpec {
     },
     /// A SerialLoom virtual port. The hub talks to its control side, while
     /// other programs open `port` (e.g. COM20) as a normal serial port.
-    Virtual { port: String },
+    Virtual {
+        port: String,
+    },
     /// Listen for one TCP client (the newest client replaces older ones).
-    TcpServer { bind: String },
+    TcpServer {
+        bind: String,
+    },
     /// Connect to a remote TCP server and reconnect when the link drops.
-    TcpClient { address: String },
-    Udp { settings: UdpSettings },
-    Replay { settings: ReplaySettings },
+    TcpClient {
+        address: String,
+    },
+    Udp {
+        settings: UdpSettings,
+    },
+    Replay {
+        settings: ReplaySettings,
+    },
 }
 
 impl EndpointSpec {
@@ -158,7 +168,11 @@ impl EndpointSpec {
             EndpointSpec::TcpServer { bind } => format!("tcp://{bind} (listen)"),
             EndpointSpec::TcpClient { address } => format!("tcp://{address}"),
             EndpointSpec::Udp { settings } => {
-                let address = if settings.receive { &settings.bind } else { &settings.destination };
+                let address = if settings.receive {
+                    &settings.bind
+                } else {
+                    &settings.destination
+                };
                 format!("udp://{address}")
             }
             EndpointSpec::Replay { settings } => match settings.format {
@@ -271,7 +285,9 @@ pub enum EndpointRequest {
     TcpClient {
         address: String,
     },
-    Udp { settings: UdpSettings },
+    Udp {
+        settings: UdpSettings,
+    },
     Replay {
         settings: ReplaySettings,
     },

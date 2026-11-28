@@ -14,11 +14,20 @@ pub(crate) struct Track {
 impl Track {
     pub(crate) fn new(settings: Option<&GpsSettings>) -> io::Result<Self> {
         fn value(text: &str, name: &str, min: f64, max: f64) -> io::Result<f64> {
-            text.trim().parse::<f64>().ok().filter(|value| (min..=max).contains(value))
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("{name} must be between {min} and {max}")))
+            text.trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|value| (min..=max).contains(value))
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("{name} must be between {min} and {max}"),
+                    )
+                })
         }
 
-        let settings = settings.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing simulator settings"))?;
+        let settings = settings
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "missing simulator settings"))?;
         Ok(Self {
             latitude: value(&settings.latitude, "Latitude", -90.0, 90.0)?,
             longitude: value(&settings.longitude, "Longitude", -180.0, 180.0)?,
@@ -27,7 +36,13 @@ impl Track {
         })
     }
 
-    pub(crate) fn frames(&self, format: ReplayFormat, elapsed: Duration, utc: SystemTime, sid: u8) -> [Vec<u8>; 3] {
+    pub(crate) fn frames(
+        &self,
+        format: ReplayFormat,
+        elapsed: Duration,
+        utc: SystemTime,
+        sid: u8,
+    ) -> [Vec<u8>; 3] {
         let (lat, lon, course) = self.fix(elapsed);
         let unix = utc.duration_since(UNIX_EPOCH).unwrap_or_default();
         let days = unix.as_secs() / 86_400;
@@ -53,14 +68,21 @@ impl Track {
         }
         let (year, month, day) = civil_date(days as i64);
         let date = format!("{day:02}{month:02}{:02}", year % 100);
-        let time = format!("{:02}{:02}{:02}.{:02}", seconds / 3600, seconds / 60 % 60,
-            seconds % 60, unix.subsec_millis() / 10);
+        let time = format!(
+            "{:02}{:02}{:02}.{:02}",
+            seconds / 3600,
+            seconds / 60 % 60,
+            seconds % 60,
+            unix.subsec_millis() / 10
+        );
         let lat = nmea_coord(lat, 2, 'N', 'S');
         let lon = nmea_coord(lon, 3, 'E', 'W');
         let speed = self.speed;
         let kmh = speed * 1.852;
         [
-            sentence(&format!("GPRMC,{time},A,{lat},{lon},{speed:.2},{course:.2},{date},,,A")),
+            sentence(&format!(
+                "GPRMC,{time},A,{lat},{lon},{speed:.2},{course:.2},{date},,,A"
+            )),
             sentence(&format!("GPGGA,{time},{lat},{lon},1,08,1.0,0.0,M,0.0,M,,")),
             sentence(&format!("GPVTG,{course:.2},T,,M,{speed:.2},N,{kmh:.2},K,A")),
         ]
@@ -76,14 +98,18 @@ impl Track {
         let lon = self.longitude.to_radians();
         let heading = self.course.to_radians();
         let (sd, cd) = angular_distance.sin_cos();
-        let next_lat = (lat.sin() * cd + lat.cos() * sd * heading.cos()).clamp(-1.0, 1.0).asin();
+        let next_lat = (lat.sin() * cd + lat.cos() * sd * heading.cos())
+            .clamp(-1.0, 1.0)
+            .asin();
         let delta_lon = (heading.sin() * sd * lat.cos()).atan2(cd - lat.sin() * next_lat.sin());
         // The forward course is the reverse bearing back to the start, plus 180°.
-        let reverse = (-delta_lon.sin() * lat.cos()).atan2(
-            next_lat.cos() * lat.sin() - next_lat.sin() * lat.cos() * delta_lon.cos(),
-        );
-        (next_lat.to_degrees(), ((lon + delta_lon).to_degrees() + 180.0).rem_euclid(360.0) - 180.0,
-            (reverse.to_degrees() + 180.0).rem_euclid(360.0))
+        let reverse = (-delta_lon.sin() * lat.cos())
+            .atan2(next_lat.cos() * lat.sin() - next_lat.sin() * lat.cos() * delta_lon.cos());
+        (
+            next_lat.to_degrees(),
+            ((lon + delta_lon).to_degrees() + 180.0).rem_euclid(360.0) - 180.0,
+            (reverse.to_degrees() + 180.0).rem_euclid(360.0),
+        )
     }
 }
 
@@ -145,7 +171,8 @@ mod tests {
             longitude: "2.2945".into(),
             course: "90".into(),
             speed: "5".into(),
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     #[test]
@@ -153,15 +180,26 @@ mod tests {
         let track = paris();
         let utc = UNIX_EPOCH + Duration::from_secs(1_767_225_600);
         let first = track.frames(ReplayFormat::Gps0183, Duration::ZERO, utc, 0);
-        let second = track.frames(ReplayFormat::Gps0183, Duration::from_secs(10), utc + Duration::from_secs(10), 1);
+        let second = track.frames(
+            ReplayFormat::Gps0183,
+            Duration::from_secs(10),
+            utc + Duration::from_secs(10),
+            1,
+        );
         let rmc = std::str::from_utf8(&first[0]).unwrap();
         assert!(rmc.starts_with("$GPRMC,000000.00,A,4851.5040,N,00217.6700,E,5.00,90.00,010126,"));
-        assert!(std::str::from_utf8(&second[0]).unwrap().starts_with("$GPRMC,000010.00,A,"));
+        assert!(
+            std::str::from_utf8(&second[0])
+                .unwrap()
+                .starts_with("$GPRMC,000010.00,A,")
+        );
         assert!(track.fix(Duration::from_secs(10)).1 > track.longitude);
         for frame in first.iter().chain(&second) {
             let (body, checksum) = std::str::from_utf8(frame).unwrap().split_once('*').unwrap();
-            assert_eq!(u8::from_str_radix(checksum.strip_suffix("\r\n").unwrap(), 16).unwrap(),
-                body[1..].bytes().fold(0, |sum, byte| sum ^ byte));
+            assert_eq!(
+                u8::from_str_radix(checksum.strip_suffix("\r\n").unwrap(), 16).unwrap(),
+                body[1..].bytes().fold(0, |sum, byte| sum ^ byte)
+            );
         }
     }
 

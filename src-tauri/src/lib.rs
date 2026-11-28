@@ -1,7 +1,7 @@
-#[cfg(windows)]
-mod topology_menu;
 mod automation;
 mod commands;
+#[cfg(windows)]
+mod topology_menu;
 mod tray;
 
 use std::path::PathBuf;

@@ -19,8 +19,7 @@ pub fn validate(settings: &ReplaySettings) -> io::Result<()> {
     if !Path::new(settings.path.trim()).is_absolute() {
         return Err(invalid("choose an absolute replay file path"));
     }
-    if !(1..=1_000_000).contains(&settings.bytes_per_second)
-        || !(1..=256).contains(&settings.lines_per_cycle)
+    if !(1..=1_000_000).contains(&settings.bytes_per_second) || !(1..=256).contains(&settings.lines_per_cycle)
     {
         return Err(invalid("replay rate or cycle settings are out of range"));
     }
@@ -31,7 +30,9 @@ pub fn validate(settings: &ReplaySettings) -> io::Result<()> {
 }
 
 fn deadline(start: Instant, delay: Duration) -> io::Result<Instant> {
-    start.checked_add(delay).ok_or_else(|| invalid("capture timestamp exceeds the supported duration"))
+    start
+        .checked_add(delay)
+        .ok_or_else(|| invalid("capture timestamp exceeds the supported duration"))
 }
 
 fn wait_until(target: Instant, stopped: &impl Fn() -> bool) -> bool {
@@ -48,11 +49,13 @@ fn wait_until(target: Instant, stopped: &impl Fn() -> bool) -> bool {
 fn decode_line(format: ReplayFormat, line: &str) -> io::Result<Vec<u8>> {
     if format == ReplayFormat::Nmea2000 {
         let hex = line.trim().as_bytes();
-        if hex.is_empty() || hex.len() % 2 != 0 {
+        if hex.is_empty() || !hex.len().is_multiple_of(2) {
             return Err(invalid("expected an even number of hexadecimal digits"));
         }
         return hex
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 let text = std::str::from_utf8(pair).map_err(|_| invalid("invalid hex data"))?;
                 u8::from_str_radix(text, 16).map_err(|_| invalid("invalid hex data"))
@@ -61,7 +64,9 @@ fn decode_line(format: ReplayFormat, line: &str) -> io::Result<Vec<u8>> {
     }
     let sentence = line.trim_end_matches(['\r', '\n']);
     if !sentence.starts_with(['$', '!']) || !sentence.is_ascii() {
-        return Err(invalid("expected an ASCII NMEA 0183 sentence starting with $ or !"));
+        return Err(invalid(
+            "expected an ASCII NMEA 0183 sentence starting with $ or !",
+        ));
     }
     Ok([sentence.as_bytes(), b"\r\n"].concat())
 }
@@ -141,8 +146,12 @@ pub fn run(
                 continue;
             }
             let (offset, data) = if settings.timestamped {
-                let (time, data) = line.split_once('\t').ok_or_else(|| invalid("expected milliseconds<TAB>data"))?;
-                let ms = time.parse::<u64>().map_err(|_| invalid("invalid millisecond timestamp"))?;
+                let (time, data) = line
+                    .split_once('\t')
+                    .ok_or_else(|| invalid("expected milliseconds<TAB>data"))?;
+                let ms = time
+                    .parse::<u64>()
+                    .map_err(|_| invalid("invalid millisecond timestamp"))?;
                 if ms < previous_ms {
                     return Err(invalid("capture timestamps must be in increasing order"));
                 }
@@ -150,7 +159,10 @@ pub fn run(
                 (Duration::from_millis(ms - *first_ms.get_or_insert(ms)), data)
             } else {
                 let cycle_index = sent / u64::from(settings.lines_per_cycle);
-                (Duration::from_millis(cycle_index.saturating_mul(u64::from(settings.cycle_ms))), line.as_str())
+                (
+                    Duration::from_millis(cycle_index.saturating_mul(u64::from(settings.cycle_ms))),
+                    line.as_str(),
+                )
             };
             let data = decode_line(settings.format, data)?;
             let deadline = deadline(started, offset)?;
@@ -174,7 +186,13 @@ pub fn run(
         } else if settings.timestamped {
             Instant::now() + cycle
         } else {
-            deadline(started, Duration::from_millis(sent.div_ceil(u64::from(settings.lines_per_cycle)).saturating_mul(u64::from(settings.cycle_ms))))?
+            deadline(
+                started,
+                Duration::from_millis(
+                    sent.div_ceil(u64::from(settings.lines_per_cycle))
+                        .saturating_mul(u64::from(settings.cycle_ms)),
+                ),
+            )?
         };
         if !wait_until(next, &stopped) {
             break;
@@ -212,15 +230,41 @@ mod tests {
     #[test]
     fn replay_formats_preserve_data_and_cadence() {
         let cases = [
-            (ReplayFormat::File, false, &b"abc"[..], vec![b"ab".to_vec(), b"c".to_vec()], 20),
-            (ReplayFormat::Nmea0183, false, &b"$A\n$B\r\n!C\n"[..],
-                vec![b"$A\r\n".to_vec(), b"$B\r\n".to_vec(), b"!C\r\n".to_vec()], 40),
-            (ReplayFormat::Nmea0183, true, &b"800\t$A\n840\t$B\n"[..],
-                vec![b"$A\r\n".to_vec(), b"$B\r\n".to_vec()], 40),
-            (ReplayFormat::Nmea2000, true, &b"100\t10020110\n125\tFF001003\n"[..],
-                vec![vec![0x10, 2, 1, 0x10], vec![0xFF, 0, 0x10, 3]], 25),
-            (ReplayFormat::Nmea2000, false, &b"\x10\x02\xFF"[..],
-                vec![vec![0x10, 2], vec![0xFF]], 20),
+            (
+                ReplayFormat::File,
+                false,
+                &b"abc"[..],
+                vec![b"ab".to_vec(), b"c".to_vec()],
+                20,
+            ),
+            (
+                ReplayFormat::Nmea0183,
+                false,
+                &b"$A\n$B\r\n!C\n"[..],
+                vec![b"$A\r\n".to_vec(), b"$B\r\n".to_vec(), b"!C\r\n".to_vec()],
+                40,
+            ),
+            (
+                ReplayFormat::Nmea0183,
+                true,
+                &b"800\t$A\n840\t$B\n"[..],
+                vec![b"$A\r\n".to_vec(), b"$B\r\n".to_vec()],
+                40,
+            ),
+            (
+                ReplayFormat::Nmea2000,
+                true,
+                &b"100\t10020110\n125\tFF001003\n"[..],
+                vec![vec![0x10, 2, 1, 0x10], vec![0xFF, 0, 0x10, 3]],
+                25,
+            ),
+            (
+                ReplayFormat::Nmea2000,
+                false,
+                &b"\x10\x02\xFF"[..],
+                vec![vec![0x10, 2], vec![0xFF]],
+                20,
+            ),
         ];
         for (format, timestamped, bytes, expected, min_ms) in cases {
             let settings = capture(format, timestamped, bytes);
@@ -243,9 +287,21 @@ mod tests {
         drop(listener);
         let hub = HubRuntime::start(
             &HubSpec {
-                id: "replay-test".into(), name: "Replay".into(), kind: HubKind::Split,
-                master: HubEndpoint { spec: EndpointSpec::Replay { settings: settings.clone() }, created: false },
-                members: vec![HubEndpoint { spec: EndpointSpec::TcpServer { bind: bind.to_string() }, created: false }],
+                id: "replay-test".into(),
+                name: "Replay".into(),
+                kind: HubKind::Split,
+                master: HubEndpoint {
+                    spec: EndpointSpec::Replay {
+                        settings: settings.clone(),
+                    },
+                    created: false,
+                },
+                members: vec![HubEndpoint {
+                    spec: EndpointSpec::TcpServer {
+                        bind: bind.to_string(),
+                    },
+                    created: false,
+                }],
                 autostart: false,
             },
             Arc::new(DemoDriver::new()),

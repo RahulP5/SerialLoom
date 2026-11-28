@@ -401,7 +401,8 @@ fn available(path: &Path) -> io::Result<u64> {
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
     let mut free = 0;
-    // The input is NUL terminated and free points to a writable u64.
+    // SAFETY: the path is NUL-terminated and `free` points to a writable u64;
+    // the other outputs are optional and passed as null.
     if unsafe {
         GetDiskFreeSpaceExW(
             path.as_ptr(),
@@ -421,10 +422,11 @@ fn available(path: &Path) -> io::Result<u64> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(path.as_os_str().as_bytes())?;
     let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
-    // statvfs initializes the result on success.
+    // SAFETY: the path is a valid C string and `stat` has room for the result.
     if unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) } != 0 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: statvfs succeeded, so it initialized `stat`.
     let stat = unsafe { stat.assume_init() };
     Ok((stat.f_bavail as u128 * stat.f_frsize as u128).min(u64::MAX as u128) as u64)
 }

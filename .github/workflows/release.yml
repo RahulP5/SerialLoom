@@ -42,22 +42,27 @@ jobs:
           releaseBody: |
             **Virtual COM port manager for Windows** - create, pair, split, join and bridge serial ports with a live visual editor.
 
-            ### What's new in 0.4.0
-            - **SerialLoom in your language:** the app now speaks German, Spanish, Portuguese (Brazil), Russian, Simplified Chinese, Japanese and Korean, besides English. It follows the Windows display language; pick another in *Settings > Appearance > Language*. The installer and the tray menu follow too. Thanks to @zhulinghuanyu for the suggestion (#15).
-            - The translations are new. If something reads wrong in your language, please open an issue with a better wording.
-            - Some messages from Windows and the port driver are still shown in English.
-            - **Virtual pairs now pass DTR across, like a null-modem cable:** each program's DTR shows up at the other port as DSR and DCD (carrier detect), with the matching `EV_DSR`/`EV_RLSD` events, and closing a port drops its DTR. Before, DSR and DCD were always on. A program that waits for DSR or DCD now waits until the program at the other port opens it with DTR on. Thanks to @duxincai for the detailed report (#17).
-            - **New: [what differs from a classic serial port](https://github.com/RahulP5/SerialLoom/blob/main/docs/USB_PORTS.md#limitations)** on ports served by Windows' USB serial driver. With `ReadIntervalTimeout` set (pyserial's `inter_byte_timeout`), a read can return no data before the first byte arrives; use a total timeout only. CTS always reads on, and breaks do not reach the other port. Thanks to @duxincai for tracking this down (#16).
+            ### What's new in 0.5.0
+            Most of this release comes from @eld400 (#18, #19). Thank you!
+            - **Français:** SerialLoom is now available in French (#18).
+            - **UDP endpoints:** receive, send or both, as raw bytes or one NMEA 0183 sentence per datagram. They listen on this PC only (`127.0.0.1`) unless you choose another address.
+            - **File replay:** play raw bytes, NMEA 0183 sentences or Actisense-format NMEA 2000 records from a file into a connection, at a set byte rate or with the recorded timing, once or in a loop.
+            - **GPS simulators:** generate NMEA 0183 (RMC, GGA, VTG) or NMEA 2000 (PGN 126992, 129025, 129026) position data from a starting point, course and speed.
+            - **Traffic capture:** right-click a link in the topology for an *Interactive trace* window or *Record to file* (text, hex or both, with UTC timestamps). Captures stop after 10 minutes, cap each file at 128 MB and keep 20 GB free on the disk.
+            - **Passive USB capture (optional):** watch a USB serial adapter's traffic with [USBPcap](https://desowin.org/usbpcap/), even while another program has the port open. Needs USBPcap installed and SerialLoom running as administrator.
+            - **Back up and restore:** *Export JSON* and *Import JSON* in the sidebar save and restore your connections, virtual ports and layout.
+            - **Topology:** TCP links are drawn with live throughput, and *Flip horizontally* in the context menu mirrors a connection.
+            - **A slow destination no longer delays the others:** each destination now has its own queue. A program still waits rather than losing data when the other side reads slowly; data from a real serial port or UDP is never held up.
 
             ### Highlights
             - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)
-            - Virtual null-modem pairs, port splitting and joining, and bridging serial ports to TCP
+            - Virtual null-modem pairs, port splitting and joining, and bridging serial ports to TCP and UDP
             - Live topology canvas with throughput, plus a traffic monitor (ASCII / hex)
             - Ports come back with the same numbers when SerialLoom starts; deleting a port removes it from Windows
             - Runs in the notification area: closing the window keeps ports open, *Quit SerialLoom* in the tray menu closes them
             - Shows the baud rate and framing each program chose on its virtual port
             - Light and dark themes (or follow Windows)
-            - In English, German, Spanish, Portuguese (Brazil), Russian, Simplified Chinese, Japanese and Korean
+            - In English, German, Spanish, French, Portuguese (Brazil), Russian, Simplified Chinese, Japanese and Korean
             - Scriptable: `serialloom-cli pair` gives a test run its own ports, with no administrator prompts
 
             ### Install

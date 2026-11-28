@@ -5,7 +5,7 @@
 # SerialLoom
 
 **Weave serial ports together.**
-Create virtual COM ports, split one port between many apps, join ports, and bridge serial devices to the network, all in a live visual editor.
+Create virtual COM ports, split one port between many apps, join ports, bridge serial devices to the network and simulate a GPS, all in a live visual editor.
 
 **[Website](https://www.serialloom.com/) · [Download](https://www.serialloom.com/download/)**
 
@@ -34,21 +34,27 @@ Many tools, from navigation software to PLC programmers, talk to devices over se
 | **Virtual null-modem pairs** | Two virtual ports wired together, so two programs can talk as if connected by a cable. Each program's DTR shows up at the other end as DSR and DCD. |
 | **Split** | Share one physical port (e.g. a GPS on `COM3`) with several programs. Each gets its own virtual port. |
 | **Join** | Merge several ports into one virtual port. |
-| **Bridge** | Wire any two endpoints: COM ↔ COM, COM ↔ TCP server, COM ↔ TCP client. |
+| **Bridge** | Wire any two endpoints: COM ↔ COM, COM ↔ TCP server or client, COM ↔ UDP. |
 | **Bus** | Every endpoint hears every other, like an RS-485 multidrop line. |
-| **Live topology** | Drag ports onto the canvas, watch data flow, inspect bytes in the traffic monitor (ASCII or hex). |
+| **UDP** | Send and receive datagrams, as raw bytes or one NMEA 0183 sentence per datagram, the way many navigation and logging programs share data. Listens on this PC only unless you choose another address. |
+| **GPS simulator** | Stand in for a GPS receiver: NMEA 0183 (RMC, GGA, GLL, GSA, GSV, VTG, ZDA, HDT) or NMEA 2000 in Actisense format, fixed or moving, with any fix quality, and changeable while it runs. Test navigation software without hardware. |
+| **File replay** | Play raw bytes, NMEA 0183 sentences or Actisense NMEA 2000 records from a file into a connection, at a set rate or with the recorded timing, once or in a loop. |
+| **Live topology** | Drag ports onto the canvas, watch data flow, inspect bytes in the traffic monitor (ASCII or hex). Right-click a link for an interactive trace window, or to record its traffic to a file. |
 | **Any baud rate** | Programs pick any speed (300 to 12 Mbaud, standard or custom) and framing; the topology shows what each program chose. Virtual ports move data at full speed whatever the setting. Real ports use the speed you set for them. |
-| **Persistent** | Connections are saved and can start automatically with SerialLoom. |
+| **Persistent** | Connections are saved and can start automatically with SerialLoom. *Backup* exports them, with your virtual ports and layout, to a JSON file and imports them again. |
 | **Automation** | Test scripts and tools can create virtual pairs, connect real devices (bridge or split), and start, stop or delete connections with `serialloom-cli` or a local API ([docs/AUTOMATION.md](docs/AUTOMATION.md)); the CLI starts SerialLoom in the background when needed. Off until you turn it on; only your own Windows account can use it. |
 | **No repeated admin prompts** | The bundled SerialLoom Helper service creates, renumbers and removes SerialLoom's own ports without asking each time. |
 | **Runs in the background** | Closing the window keeps SerialLoom in the notification area, so ports stay open. It can also start there when you sign in. *Quit SerialLoom* in the icon's menu closes every port. |
 | **Light and dark themes** | Follows Windows, or choose one in *Settings*. |
+| **Nine languages** | English, German, Spanish, French, Portuguese (Brazil), Russian, Simplified Chinese, Japanese and Korean. |
 
 ## Install
 
 Download the latest installer from [serialloom.com](https://www.serialloom.com/download/) (also on [GitHub Releases](https://github.com/RahulP5/SerialLoom/releases)) and run it. The installer sets up everything virtual ports need, including the bundled virtual USB controller. The installer also registers SerialLoom Helper, a small service that creates, renumbers and removes SerialLoom's own virtual ports, so Windows does not ask for administrator permission each time. You can remove it in *Settings > Administrator permission*; Windows then asks for each change ([details](docs/AUTOMATION.md#serialloom-helper)).
 
 Requirements: Windows 10 version 1803 or later, or Windows 11, x64.
+
+To update, run the new installer: SerialLoom updates in place, and your virtual ports keep their COM numbers, with connections and settings kept.
 
 SerialLoom shows a notice when a new version is out. To find out, it asks GitHub for the latest release when it starts and once a day; the request contains no personal data. Turn it off under *Settings > Updates*.
 
@@ -59,7 +65,8 @@ SerialLoom shows a notice when a new version is out. To find out, it asks GitHub
 1. **Split a port:** drag `COM3` from the port list onto the canvas, keep the two "New virtual port" outputs, and press *Create split*. Point each app at one of the new COM ports.
 2. **Null-modem pair:** press *Virtual pair* in the toolbar. Open each of the two ports in a different program.
 3. **Serial over the network:** choose *Bridge*, pick your serial port as side A and *TCP server* `0.0.0.0:7000` as side B.
-4. **From a script or test:** turn on *Settings > Automation*, then run `serialloom-cli pair COM41 COM42` to create a pair and `serialloom-cli delete COM41` to remove it again. [docs/AUTOMATION.md](docs/AUTOMATION.md) covers every command, connecting real hardware, test benches and CI, and the API for other languages.
+4. **Simulate a GPS:** click *NMEA 0183 simulator* at the top of the Ports list, keep one output as a new virtual port such as `COM15`, and open that port in your navigation software. The scripts in [docs/examples/python](docs/examples/python) show what arrives.
+5. **From a script or test:** turn on *Settings > Automation*, then run `serialloom-cli pair COM41 COM42` to create a pair and `serialloom-cli delete COM41` to remove it again. [docs/AUTOMATION.md](docs/AUTOMATION.md) covers every command, connecting real hardware, test benches and CI, and the API for other languages.
 
 ## Build from source
 
@@ -87,7 +94,8 @@ crates/serialloom-cli         command-line control of the running app (serialloo
 drivers/serialloom-port       UMDF 2 virtual serial port driver (Rust)
 src-tauri                     desktop shell and commands (Tauri 2)
 src                           React + TypeScript UI (React Flow, Tailwind)
-docs                          architecture and driver guides
+docs                          architecture, automation and driver guides
+docs/examples/python          test scripts: virtual pairs, NMEA 0183, NMEA 2000, UDP
 ```
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together.
@@ -96,7 +104,7 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit togethe
 
 - Run the routing engine as a Windows service, so connections keep working while the window is closed
 - Pass baud rate and modem lines through end to end (RFC 2217 for TCP)
-- Port renaming and per-port settings in the UI
+- Per-port settings in the UI
 - Linux support using pseudo-terminals
 
 ## Feedback

@@ -19,7 +19,8 @@ You will get an answer within 7 days. We will tell you when a fix ships and cred
 - The automation API (`automation.rs`, `winpipe.rs`): per-user pipe access, request parsing and limits
 - Per-PC driver signing (`localsign.rs`): the catalog hash check and private-key deletion
 - The driver (`drivers/serialloom-port`): request handling, buffer bounds, access control between the COM side and the control side
-- The TCP endpoints. They have no authentication; bind them to trusted networks only.
+- The TCP and UDP endpoints. They have no authentication; bind them to trusted networks only. A UDP endpoint listens on this PC only (`127.0.0.1`) unless set otherwise.
+- Traffic capture to file (`capture.rs`): where files are created, and the size and free-space limits
 
 ## Supported versions
 

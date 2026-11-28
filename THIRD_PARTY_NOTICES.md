@@ -35,6 +35,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 The authoritative license text ships as `usbip\LICENSE.txt` next to SerialLoom and is copied from the usbip-win2 release by `scripts/fetch-usbip-win2.ps1`.
 
+## Tauri installer template
+
+The installer is built from the NSIS installer template of the [Tauri](https://github.com/tauri-apps/tauri) bundler (`crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi`), kept in this repository as `src-tauri/windows/installer.nsi` with two changes marked `SerialLoom:`. Tauri is licensed under MIT or Apache-2.0; SerialLoom uses it under the MIT license.
+
+```
+MIT License
+
+Copyright (c) 2017 - Present Tauri Apps Contributors
+...
+```
+
 ## Windows USB serial driver
 
 The COM ports themselves are created by Windows' built-in `usbser.sys` driver, which is part of Windows and is not distributed with SerialLoom.

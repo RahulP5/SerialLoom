@@ -24,6 +24,7 @@ Then on GitHub:
 - [ ] Delete a port: it disappears from Device Manager (also with *View > Show hidden devices*).
 - [ ] Close and reopen SerialLoom: ports come back with the same numbers.
 - [ ] Update from the previous release with the default installer choices: ports keep their numbers, connections and settings stay.
+- [ ] Uninstall, keeping the app data, then install again: ports come back with their old numbers and connections work.
 - [ ] Uninstall: ports, the virtual USB controller (if SerialLoom installed it) and leftovers are gone.
 
 ## 3. Before making the repository public

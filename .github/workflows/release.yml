@@ -47,8 +47,11 @@ jobs:
 
             #### New: GPS simulator
             SerialLoom can now stand in for a GPS receiver, so you can test navigation and tracking software without hardware. When you create a connection or add an endpoint, choose **NMEA 0183 simulator** or **NMEA 2000 simulator**:
-            - **NMEA 0183** sends `$GPRMC`, `$GPGGA` and `$GPVTG` sentences with the current UTC time. **NMEA 2000** sends Actisense-format PGNs 126992 (time), 129025 (position) and 129026 (course and speed).
-            - Set the start latitude and longitude, true course, speed and update interval; the position then moves along the course. By default it starts at the Eiffel Tower and heads east at 5 knots, one update per second.
+            - **NMEA 0183:** choose which sentences to send: `RMC`, `GGA`, `GLL`, `GSA`, `GSV` (satellites in view), `VTG`, `ZDA` and `HDT`, with the `GP` or `GN` talker ID and the current UTC time. **NMEA 2000** sends Actisense-format PGNs 126992 (time), 129025 (position), 129026 (course and speed), 129539 (DOPs) and 127250 (heading).
+            - **Moving or fixed:** a moving receiver follows its course and speed from the start position; a fixed one stays put. Optional position noise makes the fix wander like a real receiver.
+            - **Fix quality:** GPS, DGPS, RTK fixed or float, estimated, or no fix (to test how your software handles a lost signal), with satellites used, HDOP, VDOP, PDOP, altitude and magnetic variation.
+            - **Change it while it runs:** select the connection, edit the values in the GPS panel and click *Apply*. Course, speed, fix, sentences and the rest change at once, and the receiver carries on from where it is. Automation can do the same with `updateSimulator`.
+            - By default it starts at the Eiffel Tower and heads east at 5 knots, sending RMC, GGA and VTG once per second, as before.
             - Send it to a virtual COM port for programs that read a serial GPS, or to UDP or TCP for programs that listen on the network.
 
             #### New: UDP

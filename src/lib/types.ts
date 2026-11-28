@@ -18,8 +18,44 @@ export const REPLAY_FORMATS = [...FILE_FORMATS, "gps0183", "gps2000"] as const;
 export type SourceFormat = typeof SOURCE_FORMATS[number];
 export const isGps = (format: ReplayFormat) => format === "gps0183" || format === "gps2000";
 
-export const DEFAULT_GPS = { latitude: "48.8584", longitude: "2.2945", course: "90", speed: "5" };
-export type GpsSettings = typeof DEFAULT_GPS;
+/** NMEA 0183 sentences the GPS simulator can send, in the order it sends them. */
+export const NMEA_SENTENCES = ["RMC", "GGA", "GLL", "GSA", "GSV", "VTG", "ZDA", "HDT"] as const;
+export type NmeaSentence = typeof NMEA_SENTENCES[number];
+export const GPS_FIXES = ["gps", "dgps", "rtk", "float", "estimated", "none"] as const;
+export type GpsFix = typeof GPS_FIXES[number];
+
+/** A GPS simulator's settings; numbers are text, as typed, and checked by SerialLoom. */
+export interface GpsSettings {
+  latitude: string;
+  longitude: string;
+  /** True course, degrees. */
+  course: string;
+  /** Knots. */
+  speed: string;
+  motion: "fixed" | "moving";
+  /** Metres above mean sea level. */
+  altitude: string;
+  fix: GpsFix;
+  satellites: string;
+  hdop: string;
+  vdop: string;
+  pdop: string;
+  /** Magnetic variation, degrees, east positive; empty when unknown. */
+  variation: string;
+  /** Random position error, metres. */
+  noise: string;
+  talker: "GP" | "GN";
+  sentences: NmeaSentence[];
+}
+
+export const DEFAULT_GPS: GpsSettings = {
+  latitude: "48.8584", longitude: "2.2945", course: "90", speed: "5", motion: "moving",
+  altitude: "35", fix: "gps", satellites: "8", hdop: "1.0", vdop: "1.5", pdop: "1.8",
+  variation: "", noise: "0", talker: "GP", sentences: ["RMC", "GGA", "VTG"],
+};
+
+/** Fills in fields that settings saved before they existed do not have. */
+export const withGpsDefaults = (gps?: Partial<GpsSettings>): GpsSettings => ({ ...DEFAULT_GPS, ...gps });
 export type ReplayFormat = typeof REPLAY_FORMATS[number];
 
 export interface ReplaySettings {

@@ -92,12 +92,119 @@ impl ReplayFormat {
     }
 }
 
+/// A GPS simulator's settings. Numbers are text, as typed in the window;
+/// they are checked when the simulator starts or is updated. Every field
+/// after `speed` has a default, so connections and backups saved before
+/// they existed still load, and behave as before.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GpsSettings {
     pub latitude: String,
     pub longitude: String,
+    /// True course over ground, degrees.
     pub course: String,
+    /// Speed over ground, knots.
     pub speed: String,
+    #[serde(default)]
+    pub motion: GpsMotion,
+    /// Altitude above mean sea level, metres.
+    #[serde(default = "gps_default_altitude")]
+    pub altitude: String,
+    #[serde(default)]
+    pub fix: GpsFix,
+    /// Satellites used in the fix (0 to 12).
+    #[serde(default = "gps_default_satellites")]
+    pub satellites: String,
+    #[serde(default = "gps_default_hdop")]
+    pub hdop: String,
+    #[serde(default = "gps_default_vdop")]
+    pub vdop: String,
+    #[serde(default = "gps_default_pdop")]
+    pub pdop: String,
+    /// Magnetic variation, degrees, east positive; empty when unknown.
+    #[serde(default)]
+    pub variation: String,
+    /// Random position error, metres; 0 for none.
+    #[serde(default = "gps_default_noise")]
+    pub noise: String,
+    #[serde(default)]
+    pub talker: NmeaTalker,
+    /// NMEA 0183 sentences to send at each update.
+    #[serde(default = "gps_default_sentences")]
+    pub sentences: Vec<NmeaSentence>,
+}
+
+fn gps_default_altitude() -> String {
+    "35".into()
+}
+fn gps_default_satellites() -> String {
+    "8".into()
+}
+fn gps_default_hdop() -> String {
+    "1.0".into()
+}
+fn gps_default_vdop() -> String {
+    "1.5".into()
+}
+fn gps_default_pdop() -> String {
+    "1.8".into()
+}
+fn gps_default_noise() -> String {
+    "0".into()
+}
+fn gps_default_sentences() -> Vec<NmeaSentence> {
+    vec![NmeaSentence::Rmc, NmeaSentence::Gga, NmeaSentence::Vtg]
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GpsMotion {
+    /// Stays at the position, speed 0.
+    Fixed,
+    /// Moves along the course at the speed.
+    #[default]
+    Moving,
+}
+
+/// Fix quality, as GGA reports it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GpsFix {
+    /// No fix: position fields are empty, RMC status V.
+    None,
+    #[default]
+    Gps,
+    Dgps,
+    Rtk,
+    Float,
+    /// Dead reckoning.
+    Estimated,
+}
+
+/// The talker ID at the start of each sentence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NmeaTalker {
+    /// GPS only.
+    #[default]
+    #[serde(rename = "GP")]
+    Gp,
+    /// Several satellite systems.
+    #[serde(rename = "GN")]
+    Gn,
+}
+
+/// The NMEA 0183 sentences the simulator can send, in the order it sends them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum NmeaSentence {
+    Rmc,
+    Gga,
+    Gll,
+    Gsa,
+    Gsv,
+    Vtg,
+    Zda,
+    Hdt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,7 +213,7 @@ pub struct ReplaySettings {
     pub path: String,
     pub format: ReplayFormat,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub gps: Option<GpsSettings>,
+    pub gps: Option<Box<GpsSettings>>,
     pub repeat: bool,
     pub timestamped: bool,
     pub bytes_per_second: u32,

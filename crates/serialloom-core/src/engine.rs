@@ -396,6 +396,48 @@ impl Engine {
         Ok(view)
     }
 
+    /// Changes a GPS simulator's settings, and optionally its update
+    /// interval. They are saved with the connection, and a running simulator
+    /// takes them on at once. `index` 0 is the master, then the members.
+    pub fn update_simulator(
+        &self,
+        id: &str,
+        index: usize,
+        gps: crate::model::GpsSettings,
+        cycle_ms: Option<u32>,
+    ) -> Result<HubView> {
+        let view = {
+            let mut hubs = self.hubs.lock();
+            let idx = position(&hubs, id)?;
+            let entry = &mut hubs[idx];
+            let endpoint = if index == 0 {
+                Some(&mut entry.spec.master)
+            } else {
+                entry.spec.members.get_mut(index - 1)
+            };
+            let Some(EndpointSpec::Replay { settings }) = endpoint.map(|e| &mut e.spec) else {
+                return Err(Error::Invalid("that endpoint is not a GPS simulator".into()));
+            };
+            if !settings.format.is_gps() {
+                return Err(Error::Invalid("that endpoint is not a GPS simulator".into()));
+            }
+            let mut next = settings.clone();
+            next.gps = Some(Box::new(gps.clone()));
+            if let Some(cycle) = cycle_ms {
+                next.cycle_ms = cycle;
+            }
+            crate::replay::validate(&next).map_err(|e| Error::Invalid(e.to_string()))?;
+            let cycle = next.cycle_ms;
+            *settings = next;
+            if let Some(runtime) = &entry.runtime {
+                runtime.update_simulator(index, gps, cycle);
+            }
+            entry.view()
+        };
+        self.save();
+        Ok(view)
+    }
+
     pub fn delete_hub(&self, id: &str, remove_virtual_ports: bool) -> Result<()> {
         let entry = {
             let mut hubs = self.hubs.lock();

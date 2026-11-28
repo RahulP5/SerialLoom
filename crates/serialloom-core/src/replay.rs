@@ -14,7 +14,7 @@ pub fn validate(settings: &ReplaySettings) -> io::Result<()> {
         return Err(invalid("replay cycle is out of range"));
     }
     if settings.format.is_gps() {
-        return crate::gps::Track::new(settings.gps.as_ref()).map(|_| ());
+        return crate::gps::Config::parse(settings.gps.as_deref()).map(|_| ());
     }
     if !Path::new(settings.path.trim()).is_absolute() {
         return Err(invalid("choose an absolute replay file path"));
@@ -78,6 +78,65 @@ fn open_capture(path: &str) -> io::Result<BufReader<File>> {
     Ok(BufReader::new(File::open(path)?))
 }
 
+/// Runs a GPS simulator whose settings can change while it runs. A change
+/// takes effect at once: the simulator sends an update with it, then goes
+/// on at the (possibly new) interval.
+pub(crate) fn run_gps(
+    format: ReplayFormat,
+    live: &parking_lot::Mutex<crate::gps::LiveSettings>,
+    stopped: impl Fn() -> bool,
+    mut emit: impl FnMut(&[u8]),
+) -> io::Result<()> {
+    let (mut version, mut cycle, config) = {
+        let settings = live.lock();
+        let config = crate::gps::Config::parse(Some(&settings.gps))?;
+        (
+            settings.version,
+            Duration::from_millis(u64::from(settings.cycle_ms)),
+            config,
+        )
+    };
+    let mut simulator = crate::gps::Simulator::new(config, Instant::now());
+    let mut next = Instant::now();
+    loop {
+        // Wait for the next update, or for new settings.
+        while Instant::now() < next {
+            if stopped() {
+                return Ok(());
+            }
+            if live.lock().version != version {
+                break;
+            }
+            std::thread::sleep(
+                next.saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(20)),
+            );
+        }
+        if stopped() {
+            return Ok(());
+        }
+        {
+            let settings = live.lock();
+            if settings.version != version {
+                version = settings.version;
+                cycle = Duration::from_millis(u64::from(settings.cycle_ms));
+                // Settings are checked before they get here; keep the old ones otherwise.
+                if let Ok(config) = crate::gps::Config::parse(Some(&settings.gps)) {
+                    simulator.update(config);
+                }
+            }
+        }
+        let now = Instant::now();
+        for frame in simulator.tick(format, now, std::time::SystemTime::now()) {
+            if stopped() {
+                return Ok(());
+            }
+            emit(&frame);
+        }
+        next = now + cycle;
+    }
+}
+
 pub fn run(
     settings: &ReplaySettings,
     stopped: impl Fn() -> bool,
@@ -86,27 +145,12 @@ pub fn run(
     validate(settings)?;
     let cycle = Duration::from_millis(u64::from(settings.cycle_ms));
     if settings.format.is_gps() {
-        let track = crate::gps::Track::new(settings.gps.as_ref())?;
-        let started = Instant::now();
-        let mut next = started;
-        let mut sid = 0;
-        while wait_until(next, &stopped) {
-            let elapsed = next.duration_since(started);
-            let frames = track.frames(settings.format, elapsed, std::time::SystemTime::now(), sid);
-            for frame in frames {
-                if stopped() {
-                    return Ok(());
-                }
-                emit(&frame);
-            }
-            sid = (sid + 1) % 253;
-            next += cycle;
-            let now = Instant::now();
-            if next <= now {
-                next = now + cycle;
-            }
-        }
-        return Ok(());
+        let live = parking_lot::Mutex::new(crate::gps::LiveSettings {
+            gps: *settings.gps.clone().unwrap_or_else(|| unreachable!("validated")),
+            cycle_ms: settings.cycle_ms,
+            version: 0,
+        });
+        return run_gps(settings.format, &live, stopped, emit);
     }
     let mut file = open_capture(settings.path.trim())?;
     while !stopped() {
@@ -320,5 +364,55 @@ mod tests {
         assert_eq!(&bytes, b"OKOKOK");
         drop(hub);
         std::fs::remove_file(settings.path).unwrap();
+    }
+
+    /// New simulator settings take effect at once, not at the next update.
+    #[test]
+    fn gps_settings_change_while_running() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let gps: crate::model::GpsSettings =
+            serde_json::from_str(r#"{"latitude":"1","longitude":"2","course":"90","speed":"5"}"#).unwrap();
+        let live = parking_lot::Mutex::new(crate::gps::LiveSettings {
+            gps,
+            cycle_ms: 10_000,
+            version: 0,
+        });
+        let stop = AtomicBool::new(false);
+        let sent = parking_lot::Mutex::new(Vec::<String>::new());
+        let wait_for = |prefix: &str| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                if sent.lock().iter().any(|s| s.starts_with(prefix)) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            false
+        };
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                run_gps(
+                    ReplayFormat::Gps0183,
+                    &live,
+                    || stop.load(Ordering::Relaxed),
+                    |frame| {
+                        sent.lock().push(String::from_utf8_lossy(frame).into_owned());
+                    },
+                )
+                .unwrap();
+            });
+            assert!(wait_for("$GPRMC"), "first update");
+            {
+                let mut settings = live.lock();
+                settings.gps.sentences = vec![crate::model::NmeaSentence::Zda];
+                settings.gps.talker = crate::model::NmeaTalker::Gn;
+                settings.version += 1;
+            }
+            let changed = Instant::now();
+            assert!(wait_for("$GNZDA"), "the change is sent at once");
+            assert!(changed.elapsed() < Duration::from_secs(1));
+            stop.store(true, Ordering::Relaxed);
+        });
     }
 }

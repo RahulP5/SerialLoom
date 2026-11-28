@@ -5,8 +5,9 @@ import { useStore } from "../store";
 import { api } from "../lib/api";
 import { HUB_COLOR, hubLabel, ascii, endpointSubtitle, endpointTitle, formatBytes, formatRate, hex, speedMismatch } from "../lib/format";
 import { HUB_ICON } from "./nodes/HubNode";
-import type { HubView, MonitorRecord } from "../lib/types";
+import { isGps, withGpsDefaults, type HubView, type MonitorRecord, type ReplaySettings } from "../lib/types";
 import { useT } from "../i18n";
+import { GpsFields } from "./dialogs/EndpointEditor";
 
 export function Inspector() {
   const { selection, hubs, select } = useStore();
@@ -205,9 +206,58 @@ function HubInspector({ hub }: { hub: HubView }) {
             </p>
           )}
         </section>
+        {endpoints.map((e, i) =>
+          e.spec.kind === "replay" && isGps(e.spec.settings.format) ? (
+            // Remounts with the saved values after each change.
+            <GpsPanel key={`${i}:${JSON.stringify(e.spec.settings)}`} hubId={spec.id} index={i}
+              settings={e.spec.settings} running={status.running} />
+          ) : null,
+        )}
         <TrafficMonitor hub={hub} />
       </div>
     </div>
+  );
+}
+
+/** A GPS simulator's settings, which can change while it runs. */
+function GpsPanel({ hubId, index, settings, running }: {
+  hubId: string;
+  index: number;
+  settings: ReplaySettings;
+  running: boolean;
+}) {
+  const { run, refresh } = useStore();
+  const t = useT();
+  const saved = withGpsDefaults(settings.gps);
+  const [gps, setGps] = useState(saved);
+  const [cycle, setCycle] = useState(settings.cycleMs);
+  const dirty = JSON.stringify(gps) !== JSON.stringify(saved) || cycle !== settings.cycleMs;
+  const nmea0183 = settings.format === "gps0183";
+  const apply = () =>
+    run(t("inspector.gpsApply"), async () => {
+      await api.updateSimulator(hubId, index, gps, cycle);
+      await refresh();
+    }, t("inspector.gpsApplied"));
+
+  return (
+    <section className="border-t border-ink-700/70 px-5 py-4">
+      <h4 className="label">{t(nmea0183 ? "editor.gps0183" : "editor.gps2000")}</h4>
+      <p className="mb-3 text-[11px] text-ink-400">{t(running ? "inspector.gpsLive" : "inspector.gpsStopped")}</p>
+      <GpsFields gps={gps} onChange={setGps} nmea0183={nmea0183} />
+      <label className="mt-3 flex items-center gap-2 text-xs">
+        {t("gps.interval")}
+        <input type="number" className="input w-28" min={1} max={60_000} step={1} value={cycle}
+          onChange={(event) => setCycle(Number(event.target.value))} />
+      </label>
+      <div className="mt-3 flex justify-end gap-2">
+        <button className="btn-ghost" disabled={!dirty} onClick={() => { setGps(saved); setCycle(settings.cycleMs); }}>
+          {t("settings.discard")}
+        </button>
+        <button className="btn-primary" disabled={!dirty} onClick={() => void apply()}>
+          {t("inspector.gpsApply")}
+        </button>
+      </div>
+    </section>
   );
 }
 

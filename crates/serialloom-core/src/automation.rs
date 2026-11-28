@@ -124,6 +124,15 @@ pub enum Request {
         #[serde(default = "yes")]
         remove_virtual_port: bool,
     },
+    /// Changes a GPS simulator's settings; a running one takes them on at
+    /// once. `index` 0 is the master, then the members.
+    UpdateSimulator {
+        id: String,
+        index: usize,
+        gps: Box<crate::model::GpsSettings>,
+        #[serde(default)]
+        cycle_ms: Option<u32>,
+    },
     CreateVirtualPorts {
         names: Vec<String>,
     },
@@ -243,6 +252,12 @@ pub fn execute(engine: &Engine, req: Request) -> Result<Value> {
             index,
             remove_virtual_port,
         } => json(engine.remove_member(&id, index, remove_virtual_port)?),
+        Request::UpdateSimulator {
+            id,
+            index,
+            gps,
+            cycle_ms,
+        } => json(engine.update_simulator(&id, index, *gps, cycle_ms)?),
         Request::CreateVirtualPorts { names } => json(engine.create_virtual_ports(names)?),
         Request::RenameVirtualPort { name, new_name } => json(engine.rename_virtual_port(&name, &new_name)?),
         Request::RemoveVirtualPort { name } => json(engine.remove_virtual_port(&name)?),

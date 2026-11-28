@@ -239,12 +239,13 @@ Responses look like `{"ok": true, "result": â€¦}` or `{"ok": false, "error": "â€
 | `listHubs` | | connections with live status |
 | `getHub` | `id` | one connection |
 | `createPair` | `a`, `b` (default `COM#`), `name`?, `autostart` (default false) | the new connection, started |
-| `createHub` | `request`: `name`, `kind` (`split`, `join`, `bridge`, `bus`), `master` and `members` endpoints (`serial`, `virtual`, `newVirtual`, `tcpServer`, `tcpClient`), `autostart`, `start`; see [Connecting real hardware](#connecting-real-hardware) | the new connection |
+| `createHub` | `request`: `name`, `kind` (`split`, `join`, `bridge`, `bus`), `master` and `members` endpoints (`serial`, `virtual`, `newVirtual`, `tcpServer`, `tcpClient`, `udp`, `replay`), `autostart`, `start`; see [Connecting real hardware](#connecting-real-hardware) and [GPS simulator](#gps-simulator) | the new connection |
 | `startHub`, `stopHub` | `id` | the connection |
 | `updateHub` | `id`, `name`?, `autostart`? | the connection |
 | `deleteHub` | `id`, `removeVirtualPorts` (default true) | nothing |
 | `addMember` | `id`, `request` | the connection |
 | `removeMember` | `id`, `index`, `removeVirtualPort` (default true) | the connection |
+| `updateSimulator` | `id`, `index` (0 is the master, then the members), `gps`, `cycleMs`? | the connection |
 | `createVirtualPorts` | `names` | the new ports |
 | `renameVirtualPort` | `name`, `newName` | the port |
 | `removeVirtualPort` | `name` | nothing |
@@ -275,6 +276,40 @@ with open(rf"\\.\pipe\SerialLoom.Automation.{sid}", "r+b", buffering=0) as pipe:
 ```
 
 A client should check that the pipe's server process runs as the same user before trusting it, as `serialloom-cli` does (`GetNamedPipeServerProcessId`, then the process token).
+
+### GPS simulator
+
+A GPS simulator is a `replay` endpoint whose `format` is `gps0183` (NMEA 0183 text) or `gps2000` (Actisense NMEA 2000). This connection sends one NMEA 0183 update per second to a new virtual port, COM30:
+
+```json
+{"command": "createHub", "request": {"name": "GPS", "kind": "bridge", "autostart": false, "start": true,
+  "master": {"kind": "replay", "settings": {"path": "", "format": "gps0183", "repeat": true, "timestamped": false,
+    "bytesPerSecond": 9600, "cycleMs": 1000, "linesPerCycle": 1,
+    "gps": {"latitude": "48.8584", "longitude": "2.2945", "course": "90", "speed": "5"}}},
+  "members": [{"kind": "newVirtual", "name": "COM30"}]}}
+```
+
+Numbers in `gps` are strings, as typed in the app. Only the first four fields are required; the rest default to:
+
+| Field | Default | Values |
+|---|---|---|
+| `motion` | `moving` | `moving` follows `course` (degrees true) at `speed` (knots); `fixed` stays at the start position |
+| `fix` | `gps` | `gps`, `dgps`, `rtk`, `float`, `estimated`, `none` (no fix: empty position fields, RMC status `V`) |
+| `satellites` | `8` | satellites used, 0 to 12 |
+| `hdop`, `vdop`, `pdop` | `1.0`, `1.5`, `1.8` | 0.5 to 99.9 |
+| `altitude` | `35` | metres above mean sea level |
+| `variation` | empty | magnetic variation in degrees, east positive; empty means unknown |
+| `noise` | `0` | random wander of the reported position, in metres |
+| `talker` | `GP` | `GP` or `GN` (GSV always uses `GP`) |
+| `sentences` | `["RMC", "GGA", "VTG"]` | any of `RMC`, `GGA`, `GLL`, `GSA`, `GSV`, `VTG`, `ZDA`, `HDT`, sent in that order |
+
+`updateSimulator` replaces a simulator's `gps` settings, and its interval if `cycleMs` is given. A running simulator uses them at once and carries on from its current position; it jumps only if `latitude` or `longitude` changed. The new settings are saved with the connection:
+
+```json
+{"command": "updateSimulator", "id": "<connection id>", "index": 0, "cycleMs": 200,
+  "gps": {"latitude": "48.8584", "longitude": "2.2945", "course": "180", "speed": "12", "fix": "dgps",
+    "sentences": ["RMC", "GGA", "GSA", "GSV", "ZDA"]}}
+```
 
 ### Trying it without the app
 

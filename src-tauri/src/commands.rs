@@ -314,6 +314,17 @@ pub async fn capture_usb_probe(
 }
 
 #[tauri::command]
+pub async fn update_simulator(
+    state: State<'_, AppState>,
+    id: String,
+    index: usize,
+    gps: GpsSettings,
+    cycle_ms: Option<u32>,
+) -> CmdResult<HubView> {
+    blocking(&state, move |e| e.update_simulator(&id, index, gps, cycle_ms)).await
+}
+
+#[tauri::command]
 pub async fn capture_link(
     state: State<'_, AppState>,
     id: String,

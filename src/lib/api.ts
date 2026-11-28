@@ -8,6 +8,7 @@ import type {
   CreateHubRequest,
   DriverInfo,
   EndpointRequest,
+  GpsSettings,
   HelperInfo,
   HubStatus,
   HubView,
@@ -34,6 +35,8 @@ export interface Api {
   startHub(id: string): Promise<HubView>;
   stopHub(id: string): Promise<HubView>;
   updateHub(id: string, name?: string, autostart?: boolean): Promise<HubView>;
+  /** Changes a GPS simulator's settings; a running one takes them on at once. Index 0 is the master. */
+  updateSimulator(id: string, index: number, gps: GpsSettings, cycleMs?: number): Promise<HubView>;
   deleteHub(id: string, removeVirtualPorts: boolean): Promise<void>;
   addMember(id: string, request: EndpointRequest): Promise<HubView>;
   removeMember(id: string, index: number, removeVirtualPort: boolean): Promise<HubView>;
@@ -76,6 +79,7 @@ const tauriApi: Api = {
   startHub: (id) => invoke("start_hub", { id }),
   stopHub: (id) => invoke("stop_hub", { id }),
   updateHub: (id, name, autostart) => invoke("update_hub", { id, name, autostart }),
+  updateSimulator: (id, index, gps, cycleMs) => invoke("update_simulator", { id, index, gps, cycleMs }),
   deleteHub: (id, removeVirtualPorts) => invoke("delete_hub", { id, removeVirtualPorts }),
   addMember: (id, request) => invoke("add_member", { id, request }),
   removeMember: (id, index, removeVirtualPort) =>

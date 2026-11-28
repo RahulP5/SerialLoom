@@ -248,6 +248,13 @@ export const mockApi: Api = {
     if (autostart !== undefined) h.spec.autostart = autostart;
     return delay(h);
   },
+  updateSimulator: async (id, index, gps, cycleMs) => {
+    const h = find(id);
+    const endpoint = [h.spec.master, ...h.spec.members][index]?.spec;
+    if (endpoint?.kind !== "replay") throw new Error("that endpoint is not a GPS simulator");
+    endpoint.settings = { ...endpoint.settings, gps, ...(cycleMs ? { cycleMs } : {}) };
+    return delay(h);
+  },
   deleteHub: async (id, removeVirtual) => {
     const h = find(id);
     hubs.splice(hubs.indexOf(h), 1);

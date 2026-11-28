@@ -226,6 +226,8 @@ struct Shared {
     counters: Vec<Counters>,
     monitor: Mutex<Monitor>,
     captures: Vec<Mutex<Option<Capture>>>,
+    /// Per endpoint: a GPS simulator's settings, which can change while it runs.
+    simulators: Vec<Option<Arc<Mutex<crate::gps::LiveSettings>>>>,
 }
 
 impl Shared {
@@ -474,6 +476,21 @@ impl HubRuntime {
             counters: (0..count).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
             captures: (0..count).map(|index| Mutex::new(armed.remove(&index))).collect(),
+            simulators: endpoints
+                .iter()
+                .map(|e| match e {
+                    EndpointSpec::Replay { settings } if settings.format.is_gps() => {
+                        settings.gps.as_deref().cloned().map(|gps| {
+                            Arc::new(Mutex::new(crate::gps::LiveSettings {
+                                gps,
+                                cycle_ms: settings.cycle_ms,
+                                version: 0,
+                            }))
+                        })
+                    }
+                    _ => None,
+                })
+                .collect(),
         });
 
         let mut threads = Vec::with_capacity(2 * count);
@@ -505,6 +522,23 @@ impl HubRuntime {
 
     pub fn status(&self) -> Vec<EndpointStatus> {
         self.shared.counters.iter().map(Counters::snapshot).collect()
+    }
+
+    /// Gives a running GPS simulator new settings (already checked).
+    pub(crate) fn update_simulator(
+        &self,
+        index: usize,
+        gps: crate::model::GpsSettings,
+        cycle_ms: u32,
+    ) -> bool {
+        let Some(Some(live)) = self.shared.simulators.get(index) else {
+            return false;
+        };
+        let mut live = live.lock();
+        live.gps = gps;
+        live.cycle_ms = cycle_ms;
+        live.version += 1;
+        true
     }
 
     pub fn capture(&self, index: usize, action: CaptureAction) -> crate::Result<CaptureStatus> {
@@ -571,14 +605,14 @@ fn run_endpoint(idx: usize, spec: EndpointSpec, driver: &Arc<dyn PortDriver>, sh
         EndpointSpec::Udp { settings } => udp_loop(idx, settings, &shared),
         EndpointSpec::Replay { settings } => {
             let counters = &shared.counters[idx];
-            let result = crate::replay::run(
-                settings,
-                || shared.stopped(),
-                |data| {
-                    counters.connected.store(true, Ordering::Relaxed);
-                    shared.route(idx, data);
-                },
-            );
+            let emit = |data: &[u8]| {
+                counters.connected.store(true, Ordering::Relaxed);
+                shared.route(idx, data);
+            };
+            let result = match shared.simulators[idx].clone() {
+                Some(live) => crate::replay::run_gps(settings.format, &live, || shared.stopped(), emit),
+                None => crate::replay::run(settings, || shared.stopped(), emit),
+            };
             if let Err(error) = result {
                 counters.set_error(format!("replay failed: {error}"));
             }
@@ -1085,6 +1119,7 @@ mod tests {
             counters: (0..n).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
             captures: (0..n).map(|_| Mutex::new(None)).collect(),
+            simulators: (0..n).map(|_| None).collect(),
         }
     }
 

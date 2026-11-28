@@ -2,8 +2,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { inTauri } from "../../lib/api";
 import { Trash } from "lucide-react";
 import { useStore } from "../../store";
-import { DEFAULT_SERIAL, DEFAULT_GPS, FILE_FORMATS, SOURCE_FORMATS, isGps, type GpsSettings, type SourceFormat, type EndpointRequest, type ReplayFormat, type ReplaySettings, type SerialSettings } from "../../lib/types";
-import { useT } from "../../i18n";
+import {
+  DEFAULT_SERIAL, DEFAULT_GPS, FILE_FORMATS, GPS_FIXES, NMEA_SENTENCES, SOURCE_FORMATS, isGps, withGpsDefaults,
+  type GpsFix, type GpsSettings, type SourceFormat, type EndpointRequest, type ReplayFormat, type ReplaySettings,
+  type SerialSettings,
+} from "../../lib/types";
+import { useT, type MessageKey } from "../../i18n";
 
 const BAUDS = [300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
@@ -165,6 +169,86 @@ export function EndpointEditor({
   );
 }
 
+type GpsNumber = "latitude" | "longitude" | "course" | "speed" | "altitude" | "satellites" | "hdop" | "vdop" |
+  "pdop" | "variation" | "noise";
+
+/** A GPS simulator's settings, as used when creating one and to change a running one. */
+export function GpsFields({ gps, onChange, nmea0183 }: {
+  gps: GpsSettings;
+  onChange: (gps: GpsSettings) => void;
+  /** NMEA 0183 (talker and sentences); otherwise NMEA 2000. */
+  nmea0183: boolean;
+}) {
+  const t = useT();
+  const set = <K extends keyof GpsSettings>(key: K, value: GpsSettings[K]) => onChange({ ...gps, [key]: value });
+  const number = (key: GpsNumber, width = "w-24") => (
+    <label className="flex items-center gap-2 text-xs">
+      {t(`gps.${key}`)}
+      <input className={`input ${width}`} type="number" step="any" value={gps[key]}
+        onChange={(event) => set(key, event.target.value)} />
+    </label>
+  );
+  const group = (title: MessageKey, children: React.ReactNode) => (
+    <fieldset>
+      <legend className="text-[11px] font-semibold tracking-wider text-ink-400 uppercase">{t(title)}</legend>
+      <div className="mt-1.5 flex flex-wrap items-center gap-3">{children}</div>
+    </fieldset>
+  );
+  return (
+    <div className="space-y-3">
+      {group("gps.position", <>
+        {number("latitude", "w-28")}
+        {number("longitude", "w-28")}
+        <label className="flex items-center gap-2 text-xs">
+          {t("gps.motion")}
+          <select className="input w-auto" value={gps.motion}
+            onChange={(event) => set("motion", event.target.value as GpsSettings["motion"])}>
+            <option value="moving">{t("gps.motionMoving")}</option>
+            <option value="fixed">{t("gps.motionFixed")}</option>
+          </select>
+        </label>
+        {number("course")}
+        {gps.motion === "moving" && number("speed")}
+        {number("noise")}
+      </>)}
+      {group("gps.quality", <>
+        <label className="flex items-center gap-2 text-xs">
+          {t("gps.fix")}
+          <select className="input w-auto" value={gps.fix} onChange={(event) => set("fix", event.target.value as GpsFix)}>
+            {GPS_FIXES.map((fix) => <option key={fix} value={fix}>{t(`gps.fix.${fix}`)}</option>)}
+          </select>
+        </label>
+        {number("satellites", "w-16")}
+        {number("hdop", "w-20")}
+        {number("vdop", "w-20")}
+        {number("pdop", "w-20")}
+        {number("altitude")}
+        {number("variation")}
+      </>)}
+      {nmea0183
+        ? group("gps.output", <>
+          <label className="flex items-center gap-2 text-xs">
+            {t("gps.talker")}
+            <select className="input w-auto" value={gps.talker}
+              onChange={(event) => set("talker", event.target.value as GpsSettings["talker"])}>
+              <option value="GP">GP</option>
+              <option value="GN">GN</option>
+            </select>
+          </label>
+          {NMEA_SENTENCES.map((sentence) => (
+            <label key={sentence} className="flex items-center gap-1.5 font-mono text-xs" title={t(`gps.sentence.${sentence}`)}>
+              <input type="checkbox" checked={gps.sentences.includes(sentence)}
+                onChange={(event) => set("sentences", NMEA_SENTENCES.filter((s) =>
+                  s === sentence ? event.target.checked : gps.sentences.includes(s)))} />
+              {sentence}
+            </label>
+          ))}
+        </>)
+        : <p className="text-xs text-ink-400">{t("gps.pgns")}</p>}
+    </div>
+  );
+}
+
 function ReplaySettingsRow({ value, onChange }: {
   value: ReplaySettings;
   onChange: (settings: ReplaySettings) => void;
@@ -181,18 +265,11 @@ function ReplaySettingsRow({ value, onChange }: {
   );
 
   if (isGps(value.format)) {
-    const gps = value.gps ?? DEFAULT_GPS;
-    const fields: (keyof GpsSettings)[] = ["latitude", "longitude", "course", "speed"];
     return (
-      <div className="mt-2 flex flex-wrap gap-3">
-        {fields.map((key) => (
-          <label key={key} className="flex items-center gap-2 text-xs">
-            {t(`gps.${key}`)}
-            <input className="input w-28" type="number" step="any" value={gps[key]}
-              onChange={(event) => onChange({ ...value, gps: { ...gps, [key]: event.target.value } })} />
-          </label>
-        ))}
-        {numeric("cycleMs", t("replay.cycle"), 60_000)}
+      <div className="mt-2 space-y-3">
+        <GpsFields gps={withGpsDefaults(value.gps)} nmea0183={value.format === "gps0183"}
+          onChange={(gps) => onChange({ ...value, gps })} />
+        <div className="flex flex-wrap gap-3">{numeric("cycleMs", t("gps.interval"), 60_000)}</div>
       </div>
     );
   }

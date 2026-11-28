@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "../i18n";
 import { api, errorText, inTauri } from "./api";
 import { HUB_KINDS } from "./format";
-import { REPLAY_FORMATS, isGps } from "./types";
-import type { ReplayFormat, CreateHubRequest, EndpointSpec, HubKind, HubSpec } from "./types";
+import { DEFAULT_GPS, GPS_FIXES, NMEA_SENTENCES, REPLAY_FORMATS, isGps } from "./types";
+import type { GpsSettings, NmeaSentence, ReplayFormat, CreateHubRequest, EndpointSpec, HubKind, HubSpec } from "./types";
 
 type Position = { x: number; y: number };
 type SavedHub = Omit<CreateHubRequest, "start" | "master" | "members"> & {
@@ -98,8 +98,26 @@ function endpoint(value: unknown): EndpointSpec {
               !Number.isFinite(number) || number < min || number > max) return invalid();
           return value;
         };
-        gps = { latitude: field("latitude", -90, 90), longitude: field("longitude", -180, 180),
-          course: field("course", 0, 360), speed: field("speed", 0, 100) };
+        // Fields added after the first four are optional, so older backups still load.
+        const optional = (key: keyof GpsSettings, min: number, max: number) =>
+          config[key] === undefined ? DEFAULT_GPS[key] as string : field(key, min, max);
+        const choice = <T extends string>(key: keyof GpsSettings, allowed: readonly T[]): T => {
+          const value = config[key] ?? DEFAULT_GPS[key];
+          return allowed.includes(value as T) ? value as T : invalid();
+        };
+        const sentences = config.sentences ?? DEFAULT_GPS.sentences;
+        if (!Array.isArray(sentences) || !sentences.every((s) => NMEA_SENTENCES.includes(s))) return invalid();
+        const variation = config.variation === undefined || config.variation === "" ? "" : field("variation", -180, 180);
+        const parsed: GpsSettings = {
+          latitude: field("latitude", -90, 90), longitude: field("longitude", -180, 180),
+          course: field("course", 0, 360), speed: field("speed", 0, 1000),
+          motion: choice("motion", ["fixed", "moving"] as const), altitude: optional("altitude", -1000, 100_000),
+          fix: choice("fix", GPS_FIXES), satellites: optional("satellites", 0, 12),
+          hdop: optional("hdop", 0.5, 99.9), vdop: optional("vdop", 0.5, 99.9), pdop: optional("pdop", 0.5, 99.9),
+          variation, noise: optional("noise", 0, 10_000), talker: choice("talker", ["GP", "GN"] as const),
+          sentences: [...sentences] as NmeaSentence[],
+        };
+        gps = parsed;
       }
       return { kind: e.kind, settings: {
         path: simulation ? "" : textValue(settings.path), format: format as ReplayFormat, repeat, timestamped,

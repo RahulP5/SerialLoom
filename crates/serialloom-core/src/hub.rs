@@ -1,7 +1,12 @@
 //! User-mode data router.
 //!
-//! A reader per endpoint enqueues data for independent destination writers.
-//! A disconnected or saturated destination drops only its own data.
+//! A reader per endpoint queues data for one writer thread per destination,
+//! so a slow destination never blocks the writes to the others.
+//!
+//! When a destination's queue is full, a source that can be held back (a
+//! virtual port, TCP, a file) waits, so the sending program waits instead of
+//! losing data. A source that cannot be held back (a real serial port, UDP)
+//! is never held up: the full destination loses that data, counted as dropped.
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -24,6 +29,8 @@ const READ_TIMEOUT: Duration = Duration::from_millis(25);
 const RETRY_DELAY: Duration = Duration::from_millis(1500);
 const OUTBOX_MAX_BYTES: usize = 64 * 1024;
 const OUTBOX_MAX_CHUNKS: usize = 256;
+/// Longest a source that can be held back waits for a full target queue.
+const HOLD_LIMIT: Duration = Duration::from_secs(5);
 const WRITE_DEADLINE: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const MONITOR_MAX_BYTES: usize = 256 * 1024;
@@ -188,7 +195,18 @@ impl OutboxState {
 #[derive(Default)]
 struct Outbox {
     state: Mutex<OutboxState>,
+    /// Signalled when data is queued.
     ready: Condvar,
+    /// Signalled when queued data leaves, the writer changes, or the hub stops.
+    space: Condvar,
+}
+
+impl OutboxState {
+    fn full(&self, len: usize) -> bool {
+        // A chunk always fits into an empty queue, however large.
+        !self.pending.is_empty()
+            && (self.bytes + len > OUTBOX_MAX_BYTES || self.pending.len() >= OUTBOX_MAX_CHUNKS)
+    }
 }
 
 struct Shared {
@@ -201,6 +219,7 @@ struct Shared {
     /// Per endpoint: its sender can be held back while a target is slow.
     /// Not a real serial port: its device keeps sending (SerialLoom opens
     /// it with RTS on, so even RTS/CTS flow control does not pause it).
+    /// Not UDP either: datagrams nobody reads in time are lost.
     holdable: Vec<bool>,
     sources_only: Vec<bool>,
     outboxes: Vec<Outbox>,
@@ -237,10 +256,21 @@ impl Shared {
             let counters = &self.counters[target];
             let outbox = &self.outboxes[target];
             let mut state = outbox.state.lock();
+            if hold {
+                // The source can be held back: wait for the target to catch up,
+                // so the sending program waits instead of losing data. The
+                // target's writer always moves on (a stalled program is given
+                // up on after READ_STALL), so this ends; HOLD_LIMIT is a backstop.
+                let deadline = Instant::now() + HOLD_LIMIT;
+                while state.writer.is_some()
+                    && !self.stopped()
+                    && state.full(data.len())
+                    && !outbox.space.wait_until(&mut state, deadline).timed_out()
+                {}
+            }
             if state.writer.is_none() || self.stopped() {
                 counters.dropped.fetch_add(n, Ordering::Relaxed);
-            } else if state.bytes + data.len() > OUTBOX_MAX_BYTES || state.pending.len() >= OUTBOX_MAX_CHUNKS
-            {
+            } else if state.full(data.len()) {
                 counters.dropped.fetch_add(n, Ordering::Relaxed);
                 counters.warn_full_outbox();
             } else {
@@ -273,6 +303,7 @@ impl Shared {
                 return false;
             };
             state.bytes -= data.len();
+            outbox.space.notify_all();
             (
                 Arc::clone(state.writer.as_ref().expect("queued data requires a writer")),
                 data,
@@ -311,11 +342,13 @@ impl Shared {
     fn attach(&self, idx: usize, writer: Writer) {
         let mut state = self.outboxes[idx].state.lock();
         state.replace(Some(writer), &self.counters[idx]);
+        self.outboxes[idx].space.notify_all();
         self.counters[idx].clear_error();
     }
 
     fn detach(&self, idx: usize) {
         self.outboxes[idx].state.lock().replace(None, &self.counters[idx]);
+        self.outboxes[idx].space.notify_all();
     }
 
     /// The virtual port attached at `idx`, if any.
@@ -435,7 +468,7 @@ impl HubRuntime {
                 .collect(),
             holdable: endpoints
                 .iter()
-                .map(|e| !matches!(e, EndpointSpec::Serial { .. }))
+                .map(|e| !matches!(e, EndpointSpec::Serial { .. } | EndpointSpec::Udp { .. }))
                 .collect(),
             outboxes: (0..count).map(|_| Outbox::default()).collect(),
             counters: (0..count).map(|_| Counters::default()).collect(),
@@ -522,6 +555,7 @@ impl Drop for HubRuntime {
         for outbox in &self.shared.outboxes {
             let _state = outbox.state.lock();
             outbox.ready.notify_one();
+            outbox.space.notify_all();
         }
         for t in self.threads.drain(..) {
             let _ = t.join();
@@ -1135,7 +1169,9 @@ mod tests {
             }
         }
 
-        let sh = shared(HubKind::Split, vec![true; 3]);
+        // The master is a real serial port: it cannot be held back, so a slow
+        // member loses its own data and the others are not held up.
+        let sh = shared(HubKind::Split, vec![false, true, true]);
         let (entered_tx, entered_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         sh.attach(
@@ -1174,9 +1210,38 @@ mod tests {
             );
             assert!(sh.write_next(1, false));
             assert!(!sh.write_next(1, false));
-            assert_eq!(calls(&reconnected), (0, 1));
+            assert_eq!(calls(&reconnected), (1, 0));
             assert_eq!(sh.counters[1].snapshot().tx_bytes, 5);
         });
+    }
+
+    /// A source that can be held back (here a virtual port) waits for a full
+    /// destination queue instead of losing data, so its program's write waits.
+    #[test]
+    fn held_back_source_waits_for_a_full_queue() {
+        let target = Arc::new(Recorder::default());
+        let sh = shared(HubKind::Bridge, vec![true, true]);
+        sh.attach(1, Writer::Channel(target.clone()));
+        let chunk = [7_u8; 4096];
+        for _ in 0..OUTBOX_MAX_BYTES / chunk.len() {
+            sh.route(0, &chunk);
+        }
+
+        let routed = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                sh.route(0, b"more");
+                routed.store(true, Ordering::Relaxed);
+            });
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(
+                !routed.load(Ordering::Relaxed),
+                "a full queue must hold the source back"
+            );
+            assert!(sh.write_next(1, false));
+        });
+        assert!(routed.load(Ordering::Relaxed));
+        assert_eq!(sh.counters[1].snapshot().dropped_bytes, 0);
     }
 
     /// A virtual port whose program's lines the test sets. Records what the

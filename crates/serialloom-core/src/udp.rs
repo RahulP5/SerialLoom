@@ -131,17 +131,24 @@ mod tests {
         let (n, _) = receiver.recv_from(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"\x00\xFF");
 
+        // Each datagram is read before the next is sent: some Windows setups
+        // drop loopback datagrams sent back to back.
         writer.framing = UdpFraming::Nmea0183;
         let mut captured = Vec::new();
-        let mut sent = |bytes: &[u8]| captured.push(bytes.to_vec());
-        assert_eq!(writer.send(0, b"$GP", &mut sent).0, 0);
-        writer.send(1, b"!AIS\r\n", &mut sent);
-        writer.send(0, b"RMC\r\n$GPGGA\r\n", sent);
-        let expected = [&b"!AIS\r\n"[..], &b"$GPRMC\r\n"[..], &b"$GPGGA\r\n"[..]];
-        assert_eq!(captured, expected);
-        for expected in expected {
+        let mut recv = || {
             let (n, _) = receiver.recv_from(&mut buf).unwrap();
-            assert_eq!(&buf[..n], expected);
-        }
+            buf[..n].to_vec()
+        };
+        assert_eq!(writer.send(0, b"$GP", |b| captured.push(b.to_vec())).0, 0);
+        writer.send(1, b"!AIS\r\n", |b| captured.push(b.to_vec()));
+        assert_eq!(recv(), b"!AIS\r\n");
+        writer.send(0, b"RMC\r\n", |b| captured.push(b.to_vec()));
+        assert_eq!(recv(), b"$GPRMC\r\n");
+        writer.send(0, b"$GPGGA\r\n", |b| captured.push(b.to_vec()));
+        assert_eq!(recv(), b"$GPGGA\r\n");
+        assert_eq!(
+            captured,
+            [&b"!AIS\r\n"[..], &b"$GPRMC\r\n"[..], &b"$GPGGA\r\n"[..]]
+        );
     }
 }

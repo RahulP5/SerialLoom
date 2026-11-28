@@ -223,6 +223,8 @@ SerialLoom is a desktop app: it runs in a signed-in Windows session, and the aut
 
 `serialloom-cli` starts SerialLoom outside the build step's job object when Windows allows it, so the ports survive the step that created them.
 
+[`docs/examples/python/pair_test.py`](examples/python/pair_test.py) is a ready-made check for a bench: it sends random data both ways through a pair and exits with code 1 if any byte differs. The same folder has scripts that show what arrives from the GPS simulator, over a COM port or UDP.
+
 ### Protocol
 
 Any language can use the pipe directly: `\\.\pipe\SerialLoom.Automation.<your SID>`. Your SID is shown by `whoami /user`, and the full pipe name in *Settings > Automation*.

@@ -71,6 +71,7 @@ jobs:
             - **Topology:** TCP links are drawn with live throughput, and *Flip horizontally* in the context menu mirrors a connection.
             - **A slow destination no longer delays the others:** each destination now has its own queue. A program still waits rather than losing data when the other side reads slowly; data from a real serial port or UDP is never held up.
             - **Settings:** the Save button now stays at the bottom of the page and turns amber while there are unsaved changes.
+            - **Test scripts:** [docs/examples/python](https://github.com/RahulP5/SerialLoom/tree/main/docs/examples/python) has small Python scripts that check a virtual pair and show what arrives from the GPS simulator, over a COM port or UDP.
 
             ### Highlights
             - Virtual COM ports that any program can open, with the COM numbers you choose (e.g. COM20)

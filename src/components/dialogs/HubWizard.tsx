@@ -43,6 +43,12 @@ export function HubWizard({ preset, onClose }: { preset?: Partial<CreateHubReque
     const d = defaults(k, firstFree);
     setKind(k);
     // Keep a chosen existing source port when switching between templates.
+    const replay = [master, ...members].find((endpoint) => endpoint.kind === "replay");
+    if (replay) {
+      setMaster(k === "join" ? d.master : replay);
+      setMembers(k === "join" ? [replay, ...d.members.slice(1)] : d.members);
+      return;
+    }
     setMaster(k === "split" || k === "bridge" ? (master.kind === "serial" ? master : d.master) : d.master);
     setMembers(d.members);
   };

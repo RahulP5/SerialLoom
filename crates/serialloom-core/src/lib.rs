@@ -16,17 +16,24 @@
 pub mod automation;
 #[cfg(windows)]
 pub mod autostart;
+pub mod capture;
 pub mod config;
 pub mod driver;
 pub mod engine;
 pub mod error;
+mod gps;
 pub mod hub;
 pub mod logging;
 pub mod model;
 pub mod ports;
+mod replay;
+mod udp;
 pub mod usbip;
 #[cfg(windows)]
 pub mod winpipe;
 
 pub use engine::Engine;
 pub use error::{Error, Result};
+
+#[cfg(any(windows, test))]
+pub mod usb_probe;

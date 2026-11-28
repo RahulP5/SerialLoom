@@ -8,7 +8,8 @@ use serde::Serialize;
 use serialloom_core::config::{AppSettings, save_json};
 use serialloom_core::model::*;
 use serialloom_core::{Engine, Result as CoreResult};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::AppState;
 use crate::automation::AutomationInfo;
@@ -134,6 +135,24 @@ pub async fn remove_virtual_port(state: State<'_, AppState>, name: String) -> Cm
 }
 
 #[tauri::command]
+pub async fn save_topology_backup(app: AppHandle, text: String) -> CmdResult<bool> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = app
+            .dialog()
+            .file()
+            .add_filter("JSON", &["json"])
+            .set_file_name("serialloom-topology.json")
+            .blocking_save_file();
+        let Some(path) = path else { return Ok(false) };
+        let path = path.into_path().map_err(|e| e.to_string())?;
+        std::fs::write(path, text).map_err(|e| e.to_string())?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| format!("internal error: {e}"))?
+}
+
+#[tauri::command]
 pub async fn list_hubs(state: State<'_, AppState>) -> CmdResult<Vec<HubView>> {
     blocking(&state, |e| Ok(e.hubs())).await
 }
@@ -185,6 +204,120 @@ pub async fn remove_member(
     remove_virtual_port: bool,
 ) -> CmdResult<HubView> {
     blocking(&state, move |e| e.remove_member(&id, index, remove_virtual_port)).await
+}
+
+#[tauri::command]
+pub async fn open_trace_window(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    index: usize,
+    source: String,
+    target: String,
+    forward_rx: bool,
+    file_mode: bool,
+    usb_probe: Option<bool>,
+) -> CmdResult<()> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
+    let mut hash = DefaultHasher::new();
+    let usb_probe = usb_probe.unwrap_or(false);
+    (&id, index, usb_probe).hash(&mut hash);
+    let label = format!("trace-{:016x}", hash.finish());
+    if let Some(window) = app.get_webview_window(&label) {
+        window.unminimize().map_err(|error| error.to_string())?;
+        return window.set_focus().map_err(|error| error.to_string());
+    }
+
+    let options = serde_json::json!({
+        "id": id, "index": index, "source": source, "target": target,
+        "forwardRx": forward_rx, "fileMode": file_mode, "usbProbe": usb_probe,
+    });
+    let parent = app
+        .get_webview_window("main")
+        .ok_or("main window is unavailable")?;
+    let window = WebviewWindowBuilder::new(&app, label, WebviewUrl::App("index.html".into()))
+        .parent(&parent)
+        .map_err(|error| error.to_string())?
+        .title("SerialLoom — Trace")
+        .inner_size(1050.0, 700.0)
+        .min_inner_size(600.0, 440.0)
+        .initialization_script(format!("window.__SERIALLOOM_TRACE__ = {options};"))
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    let engine = Arc::clone(&state.engine);
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            let engine = Arc::clone(&engine);
+            let id = id.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                if usb_probe {
+                    #[cfg(windows)]
+                    USB_PROBES.lock().remove(&id);
+                } else {
+                    let _ =
+                        engine.capture_link(&id, index, serialloom_core::capture::CaptureAction::CloseWindow);
+                }
+            });
+        }
+    });
+    Ok(())
+}
+
+#[cfg(windows)]
+static USB_PROBES: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::HashMap<String, serialloom_core::usb_probe::UsbProbe>>,
+> = std::sync::LazyLock::new(Default::default);
+
+#[tauri::command]
+pub async fn capture_usb_probe(
+    id: String,
+    action: serialloom_core::capture::CaptureAction,
+) -> CmdResult<serde_json::Value> {
+    #[cfg(windows)]
+    {
+        use serialloom_core::capture::{CaptureAction, CaptureStatus};
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut probes = USB_PROBES.lock();
+            match action {
+                CaptureAction::Start(request) => {
+                    if probes.get(&id).is_some_and(|probe| probe.running()) {
+                        return Err("USB capture is already running".into());
+                    }
+                    let probe = serialloom_core::usb_probe::UsbProbe::start(&id, request)
+                        .map_err(|error| error.to_string())?;
+                    probes.insert(id.clone(), probe);
+                }
+                CaptureAction::Stop | CaptureAction::CloseWindow => {
+                    if let Some(probe) = probes.get(&id) {
+                        probe.stop();
+                    }
+                }
+                CaptureAction::Status | CaptureAction::Summary => {}
+            }
+            Ok(probes
+                .get(&id)
+                .map_or_else(|| serde_json::json!(CaptureStatus::idle()), |probe| probe.status()))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (id, action);
+        Err("USBPcap requires Windows".into())
+    }
+}
+
+#[tauri::command]
+pub async fn capture_link(
+    state: State<'_, AppState>,
+    id: String,
+    index: usize,
+    action: serialloom_core::capture::CaptureAction,
+) -> CmdResult<serialloom_core::capture::CaptureStatus> {
+    blocking(&state, move |e| e.capture_link(&id, index, action)).await
 }
 
 #[tauri::command]

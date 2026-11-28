@@ -12,11 +12,41 @@ export interface SerialSettings {
   flowControl: FlowControl;
 }
 
+export const FILE_FORMATS = ["file", "nmea0183", "nmea2000"] as const;
+export const SOURCE_FORMATS = ["file", "gps0183", "gps2000"] as const;
+export const REPLAY_FORMATS = [...FILE_FORMATS, "gps0183", "gps2000"] as const;
+export type SourceFormat = typeof SOURCE_FORMATS[number];
+export const isGps = (format: ReplayFormat) => format === "gps0183" || format === "gps2000";
+
+export const DEFAULT_GPS = { latitude: "48.8584", longitude: "2.2945", course: "90", speed: "5" };
+export type GpsSettings = typeof DEFAULT_GPS;
+export type ReplayFormat = typeof REPLAY_FORMATS[number];
+
+export interface ReplaySettings {
+  path: string;
+  format: ReplayFormat;
+  gps?: GpsSettings;
+  repeat: boolean;
+  timestamped: boolean;
+  bytesPerSecond: number;
+  cycleMs: number;
+  linesPerCycle: number;
+}
+
+export interface UdpSettings {
+  bind: string;
+  destination: string;
+  receive: boolean;
+  framing: "raw" | "nmea0183";
+}
+
 export type EndpointSpec =
   | { kind: "serial"; port: string; settings: SerialSettings }
   | { kind: "virtual"; port: string }
   | { kind: "tcpServer"; bind: string }
-  | { kind: "tcpClient"; address: string };
+  | { kind: "tcpClient"; address: string }
+  | { kind: "udp"; settings: UdpSettings }
+  | { kind: "replay"; settings: ReplaySettings };
 
 export type EndpointRequest = EndpointSpec | { kind: "newVirtual"; name: string };
 

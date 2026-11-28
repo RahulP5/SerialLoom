@@ -73,7 +73,7 @@ function emptyStatus(spec: HubSpec, running: boolean): HubStatus {
       rxBytes: 0,
       txBytes: 0,
       droppedBytes: 0,
-      connected: running,
+      connected: running && e.spec.kind !== "tcpClient",
       peerOpen: running && e.spec.kind === "virtual" && i !== 2,
       lastError: null,
       warning: null,
@@ -124,16 +124,33 @@ seed();
 
 // Simulated traffic: NMEA-like bursts from the split master, chatter on the bridges.
 setInterval(() => {
-  for (const h of hubs) {
-    if (!h.status.running) continue;
+  const runningHubs = hubs.filter((hub) => hub.status.running);
+  const listeners = new Set<string>();
+  for (const hub of runningHubs) {
+    for (const { spec } of [hub.spec.master, ...hub.spec.members]) {
+      if (spec.kind === "tcpServer") listeners.add(spec.bind.trim().toLowerCase());
+    }
+  }
+
+  for (const h of runningHubs) {
     const eps = h.status.endpoints;
+    [h.spec.master, ...h.spec.members].forEach(({ spec }, i) => {
+      if (spec.kind !== "tcpClient") return;
+      const address = spec.address.trim().toLowerCase().replace(/^localhost:/, "127.0.0.1:");
+      eps[i].connected = listeners.has(address) ||
+        (address.startsWith("127.0.0.1:") && listeners.has(address.replace(/^127\.0\.0\.1:/, "0.0.0.0:")));
+    });
+
+    if (!eps[0].connected) continue;
+    const activeMembers = eps.slice(1).filter((endpoint) => endpoint.connected);
+    if (activeMembers.length === 0) continue;
     const n = h.spec.kind === "split" ? 60 + Math.floor(Math.random() * 40) : Math.floor(Math.random() * 30);
     eps[0].rxBytes += n;
-    for (let i = 1; i < eps.length; i++) eps[i].txBytes += n;
+    for (const endpoint of activeMembers) endpoint.txBytes += n;
     if (Math.random() < 0.3) {
-      const m = 1 + Math.floor(Math.random() * (eps.length - 1));
+      const member = activeMembers[Math.floor(Math.random() * activeMembers.length)];
       const k = 8 + Math.floor(Math.random() * 12);
-      eps[m].rxBytes += k;
+      member.rxBytes += k;
       eps[0].txBytes += k;
     }
     const log = (monitor[h.spec.id] ??= []);

@@ -1,23 +1,19 @@
 //! User-mode data router.
 //!
-//! A running hub has one reader thread per endpoint. Each thread owns its
-//! connection: it opens (and re-opens) the port or socket, publishes a writer
-//! handle, reads incoming bytes and pushes them straight to the writers of
-//! the target endpoints. With no central router thread, latency stays low,
-//! and a slow target applies back-pressure to its source only. A real serial
-//! port cannot be held back, so its data is never held up by a slow target:
-//! a target that cannot take it right now loses it (counted as dropped).
+//! A reader per endpoint enqueues data for independent destination writers.
+//! A disconnected or saturated destination drops only its own data.
 
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 
+use crate::capture::{self, Capture, CaptureAction, CaptureStatus, Direction};
 use crate::driver::{ControlChannel, PortDriver};
 use crate::model::{
     EndpointSpec, EndpointStatus, FlowControl, HubKind, HubSpec, LineStatus, MonitorRecord, Parity,
@@ -26,6 +22,8 @@ use crate::model::{
 
 const READ_TIMEOUT: Duration = Duration::from_millis(25);
 const RETRY_DELAY: Duration = Duration::from_millis(1500);
+const OUTBOX_MAX_BYTES: usize = 64 * 1024;
+const OUTBOX_MAX_CHUNKS: usize = 256;
 const WRITE_DEADLINE: Duration = Duration::from_secs(2);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const MONITOR_MAX_BYTES: usize = 256 * 1024;
@@ -38,6 +36,7 @@ enum Writer {
     Stream(Box<dyn Write + Send>),
     /// A SerialLoom virtual port.
     Channel(Arc<dyn ControlChannel>),
+    Udp(crate::udp::UdpWriter),
 }
 
 impl Writer {
@@ -47,6 +46,7 @@ impl Writer {
     fn write(&mut self, data: &[u8], hold: bool) -> io::Result<usize> {
         match self {
             Writer::Stream(w) => w.write(data),
+            Writer::Udp(_) => unreachable!("UDP writes use datagram framing"),
             Writer::Channel(c) if hold => c.write(data),
             Writer::Channel(c) => c.write_now(data),
         }
@@ -93,6 +93,15 @@ impl Counters {
         if slot.as_deref() != Some(message.as_str()) {
             tracing::warn!("{message}");
             *slot = Some(message);
+        }
+    }
+
+    fn warn_full_outbox(&self) {
+        let mut warning = self.warning.lock();
+        let message = "output queue full; data is being dropped";
+        if warning.as_deref() != Some(message) {
+            tracing::warn!("{message}");
+            *warning = Some(message.into());
         }
     }
 
@@ -152,6 +161,36 @@ impl Monitor {
     }
 }
 
+type AttachedWriter = Arc<Mutex<Writer>>;
+
+#[derive(Default)]
+struct OutboxState {
+    writer: Option<AttachedWriter>,
+    channel: Option<Arc<dyn ControlChannel>>,
+    pending: VecDeque<(Arc<[u8]>, bool, usize)>,
+    bytes: usize,
+}
+
+impl OutboxState {
+    fn replace(&mut self, writer: Option<Writer>, counters: &Counters) {
+        counters.dropped.fetch_add(self.bytes as u64, Ordering::Relaxed);
+        self.pending.clear();
+        self.bytes = 0;
+        self.channel = match &writer {
+            Some(Writer::Channel(channel)) => Some(Arc::clone(channel)),
+            _ => None,
+        };
+        counters.connected.store(writer.is_some(), Ordering::Relaxed);
+        self.writer = writer.map(|writer| Arc::new(Mutex::new(writer)));
+    }
+}
+
+#[derive(Default)]
+struct Outbox {
+    state: Mutex<OutboxState>,
+    ready: Condvar,
+}
+
 struct Shared {
     kind: HubKind,
     /// Two virtual ports bridged together: each program's DTR reaches the
@@ -163,9 +202,11 @@ struct Shared {
     /// Not a real serial port: its device keeps sending (SerialLoom opens
     /// it with RTS on, so even RTS/CTS flow control does not pause it).
     holdable: Vec<bool>,
-    writers: Vec<Mutex<Option<Writer>>>,
+    sources_only: Vec<bool>,
+    outboxes: Vec<Outbox>,
     counters: Vec<Counters>,
     monitor: Mutex<Monitor>,
+    captures: Vec<Mutex<Option<Capture>>>,
 }
 
 impl Shared {
@@ -185,46 +226,101 @@ impl Shared {
         let n = data.len() as u64;
         self.counters[src].rx.fetch_add(n, Ordering::Relaxed);
         self.monitor.lock().push(src, data);
+        self.record(src, Direction::Rx, data);
 
         let hold = self.holdable[src];
-        for target in route_targets(self.kind, self.writers.len(), src) {
+        let mut payload = None;
+        for target in route_targets(self.kind, self.outboxes.len(), src) {
+            if self.sources_only[target] {
+                continue;
+            }
             let counters = &self.counters[target];
-            let mut slot = self.writers[target].lock();
-            match slot.as_mut() {
-                Some(w) => match write_with_deadline(w, data, hold) {
-                    Ok(()) => {
-                        counters.tx.fetch_add(n, Ordering::Relaxed);
-                        counters.clear_warning();
-                    }
-                    Err(e) => {
-                        counters.dropped.fetch_add(n, Ordering::Relaxed);
-                        counters.set_warning(&e);
-                    }
-                },
-                None => {
-                    counters.dropped.fetch_add(n, Ordering::Relaxed);
-                }
+            let outbox = &self.outboxes[target];
+            let mut state = outbox.state.lock();
+            if state.writer.is_none() || self.stopped() {
+                counters.dropped.fetch_add(n, Ordering::Relaxed);
+            } else if state.bytes + data.len() > OUTBOX_MAX_BYTES || state.pending.len() >= OUTBOX_MAX_CHUNKS
+            {
+                counters.dropped.fetch_add(n, Ordering::Relaxed);
+                counters.warn_full_outbox();
+            } else {
+                let payload = payload.get_or_insert_with(|| Arc::<[u8]>::from(data));
+                state.pending.push_back((Arc::clone(payload), hold, src));
+                state.bytes += data.len();
+                outbox.ready.notify_one();
             }
         }
     }
 
+    fn record(&self, idx: usize, direction: Direction, data: &[u8]) {
+        if let Some(capture) = self.captures[idx].lock().as_ref() {
+            capture.record(direction, data);
+        }
+    }
+
+    fn write_next(&self, idx: usize, wait: bool) -> bool {
+        let outbox = &self.outboxes[idx];
+        let counters = &self.counters[idx];
+        let (writer, data, hold, source) = {
+            let mut state = outbox.state.lock();
+            while wait && !self.stopped() && state.pending.is_empty() {
+                outbox.ready.wait(&mut state);
+            }
+            if self.stopped() {
+                return false;
+            }
+            let Some((data, hold, source)) = state.pending.pop_front() else {
+                return false;
+            };
+            state.bytes -= data.len();
+            (
+                Arc::clone(state.writer.as_ref().expect("queued data requires a writer")),
+                data,
+                hold,
+                source,
+            )
+        };
+
+        let (written, dropped, error) = match &mut *writer.lock() {
+            Writer::Udp(writer) => writer.send(source, &data, |bytes| self.record(idx, Direction::Tx, bytes)),
+            writer => {
+                let (written, error) = write_with_deadline(writer, &data, hold, |bytes| {
+                    self.record(idx, Direction::Tx, bytes)
+                });
+                (written, data.len() - written, error)
+            }
+        };
+        counters.tx.fetch_add(written as u64, Ordering::Relaxed);
+        counters.dropped.fetch_add(dropped as u64, Ordering::Relaxed);
+        let state = outbox.state.lock();
+        // An in-flight write belongs to the old connection if the reader replaced it.
+        if state
+            .writer
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &writer))
+        {
+            if let Some(error) = error {
+                counters.set_warning(&error);
+            } else if state.pending.is_empty() {
+                counters.clear_warning();
+            }
+        }
+        true
+    }
+
     fn attach(&self, idx: usize, writer: Writer) {
-        *self.writers[idx].lock() = Some(writer);
-        self.counters[idx].connected.store(true, Ordering::Relaxed);
+        let mut state = self.outboxes[idx].state.lock();
+        state.replace(Some(writer), &self.counters[idx]);
         self.counters[idx].clear_error();
     }
 
     fn detach(&self, idx: usize) {
-        self.writers[idx].lock().take();
-        self.counters[idx].connected.store(false, Ordering::Relaxed);
+        self.outboxes[idx].state.lock().replace(None, &self.counters[idx]);
     }
 
     /// The virtual port attached at `idx`, if any.
     fn channel(&self, idx: usize) -> Option<Arc<dyn ControlChannel>> {
-        match self.writers[idx].lock().as_ref()? {
-            Writer::Channel(c) => Some(Arc::clone(c)),
-            Writer::Stream(_) => None,
-        }
+        self.outboxes[idx].state.lock().channel.clone()
     }
 
     /// Null-modem pair: the other end of `idx`.
@@ -273,26 +369,34 @@ fn is_transient(e: &io::Error) -> bool {
     )
 }
 
-fn write_with_deadline(w: &mut Writer, mut data: &[u8], hold: bool) -> io::Result<()> {
+fn write_with_deadline(
+    w: &mut Writer,
+    mut data: &[u8],
+    hold: bool,
+    mut sent: impl FnMut(&[u8]),
+) -> (usize, Option<io::Error>) {
+    let len = data.len();
     let deadline = Instant::now() + WRITE_DEADLINE;
-    while !data.is_empty() {
+    let error = loop {
+        if data.is_empty() {
+            break None;
+        }
         match w.write(data, hold) {
             Ok(0) => {
-                return Err(io::Error::new(
+                break Some(io::Error::new(
                     io::ErrorKind::WriteZero,
                     "endpoint accepted no data",
                 ));
             }
-            Ok(n) => data = &data[n..],
-            Err(e) if is_transient(&e) => {
-                if Instant::now() >= deadline {
-                    return Err(e);
-                }
+            Ok(n) => {
+                sent(&data[..n]);
+                data = &data[n..];
             }
-            Err(e) => return Err(e),
+            Err(e) if is_transient(&e) && Instant::now() < deadline => {}
+            Err(e) => break Some(e),
         }
-    }
-    Ok(())
+    };
+    (len - data.len(), error)
 }
 
 /// A started hub. Dropping it stops all threads and closes every port.
@@ -303,6 +407,14 @@ pub struct HubRuntime {
 
 impl HubRuntime {
     pub fn start(spec: &HubSpec, driver: Arc<dyn PortDriver>) -> Self {
+        Self::start_with_captures(spec, driver, Default::default())
+    }
+
+    pub(crate) fn start_with_captures(
+        spec: &HubSpec,
+        driver: Arc<dyn PortDriver>,
+        mut armed: std::collections::HashMap<usize, Capture>,
+    ) -> Self {
         let endpoints: Vec<EndpointSpec> = spec.endpoints().map(|e| e.spec.clone()).collect();
         let count = endpoints.len();
         let shared = Arc::new(Shared {
@@ -313,34 +425,89 @@ impl HubRuntime {
                     .iter()
                     .all(|e| matches!(e, EndpointSpec::Virtual { .. })),
             stop: AtomicBool::new(false),
+            sources_only: endpoints
+                .iter()
+                .map(|ep| match ep {
+                    EndpointSpec::Replay { .. } => true,
+                    EndpointSpec::Udp { settings } => settings.destination.trim().is_empty(),
+                    _ => false,
+                })
+                .collect(),
             holdable: endpoints
                 .iter()
                 .map(|e| !matches!(e, EndpointSpec::Serial { .. }))
                 .collect(),
-            writers: (0..count).map(|_| Mutex::new(None)).collect(),
+            outboxes: (0..count).map(|_| Outbox::default()).collect(),
             counters: (0..count).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
+            captures: (0..count).map(|index| Mutex::new(armed.remove(&index))).collect(),
         });
 
-        let threads = endpoints
-            .into_iter()
-            .enumerate()
-            .filter_map(|(idx, ep)| {
-                let shared = Arc::clone(&shared);
-                let driver = Arc::clone(&driver);
-                std::thread::Builder::new()
-                    .name(format!("hub-{}-{idx}", spec.name))
-                    .spawn(move || run_endpoint(idx, ep, &driver, shared))
-                    .map_err(|e| tracing::error!("cannot spawn endpoint thread: {e}"))
-                    .ok()
-            })
-            .collect();
+        let mut threads = Vec::with_capacity(2 * count);
+        for (idx, ep) in endpoints.into_iter().enumerate() {
+            let writer = Arc::clone(&shared);
+            match std::thread::Builder::new()
+                .name(format!("hub-{}-{idx}-writer", spec.name))
+                .spawn(move || while writer.write_next(idx, true) {})
+            {
+                Ok(thread) => threads.push(thread),
+                Err(error) => {
+                    shared.counters[idx].set_error(format!("cannot spawn writer: {error}"));
+                    continue;
+                }
+            }
+            let reader = Arc::clone(&shared);
+            let driver = Arc::clone(&driver);
+            match std::thread::Builder::new()
+                .name(format!("hub-{}-{idx}-reader", spec.name))
+                .spawn(move || run_endpoint(idx, ep, &driver, reader))
+            {
+                Ok(thread) => threads.push(thread),
+                Err(error) => shared.counters[idx].set_error(format!("cannot spawn reader: {error}")),
+            }
+        }
 
         Self { shared, threads }
     }
 
     pub fn status(&self) -> Vec<EndpointStatus> {
         self.shared.counters.iter().map(Counters::snapshot).collect()
+    }
+
+    pub fn capture(&self, index: usize, action: CaptureAction) -> crate::Result<CaptureStatus> {
+        let slot = self
+            .shared
+            .captures
+            .get(index)
+            .ok_or_else(|| crate::Error::Invalid("invalid capture endpoint".into()))?;
+        let include_records = !matches!(action, CaptureAction::Summary);
+        match action {
+            CaptureAction::Start(request) => {
+                {
+                    let current = slot.lock();
+                    if current.as_ref().is_some_and(Capture::running) {
+                        return Err(crate::Error::Invalid(
+                            "a capture is already running on this endpoint".into(),
+                        ));
+                    }
+                }
+                // File creation and free space checks take place outside the routing lock.
+                let capture = Capture::start(request)?;
+                *slot.lock() = Some(capture);
+            }
+            CaptureAction::Stop => {
+                if let Some(capture) = slot.lock().as_ref() {
+                    capture.stop();
+                }
+            }
+            CaptureAction::CloseWindow => {
+                if let Some(capture) = slot.lock().as_ref().filter(|capture| !capture.is_file()) {
+                    capture.stop();
+                }
+            }
+            CaptureAction::Status | CaptureAction::Summary => {}
+        }
+        Ok(capture::status(slot.lock().as_ref(), include_records))
     }
 
     /// Traffic records with `seq > after` (at most the newest 500).
@@ -352,6 +519,10 @@ impl HubRuntime {
 impl Drop for HubRuntime {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
+        for outbox in &self.shared.outboxes {
+            let _state = outbox.state.lock();
+            outbox.ready.notify_one();
+        }
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
@@ -363,6 +534,21 @@ fn run_endpoint(idx: usize, spec: EndpointSpec, driver: &Arc<dyn PortDriver>, sh
         EndpointSpec::Serial { port, settings } => serial_loop(idx, port, settings, &shared),
         EndpointSpec::TcpServer { bind } => tcp_server_loop(idx, bind, &shared),
         EndpointSpec::TcpClient { address } => tcp_client_loop(idx, address, &shared),
+        EndpointSpec::Udp { settings } => udp_loop(idx, settings, &shared),
+        EndpointSpec::Replay { settings } => {
+            let counters = &shared.counters[idx];
+            let result = crate::replay::run(
+                settings,
+                || shared.stopped(),
+                |data| {
+                    counters.connected.store(true, Ordering::Relaxed);
+                    shared.route(idx, data);
+                },
+            );
+            if let Err(error) = result {
+                counters.set_error(format!("replay failed: {error}"));
+            }
+        }
         EndpointSpec::Virtual { port } => virtual_loop(idx, port, driver.as_ref(), &shared),
     }
     shared.detach(idx);
@@ -629,6 +815,62 @@ fn tcp_client_loop(idx: usize, address: &str, sh: &Shared) {
     }
 }
 
+fn udp_loop(idx: usize, settings: &crate::model::UdpSettings, sh: &Shared) {
+    let counters = &sh.counters[idx];
+    let (bind, destination) = match crate::udp::addresses(settings) {
+        Ok(addresses) => addresses,
+        Err(error) => {
+            counters.set_error(error.to_string());
+            return;
+        }
+    };
+
+    let mut buffer = vec![0; 65_536];
+    while !sh.stopped() {
+        let setup = (|| {
+            let socket = UdpSocket::bind(bind)?;
+            socket.set_read_timeout(Some(READ_TIMEOUT))?;
+            if let Some(destination) = destination {
+                if destination.is_ipv4() {
+                    socket.set_broadcast(true)?;
+                }
+                socket.set_write_timeout(Some(READ_TIMEOUT))?;
+                let writer = crate::udp::UdpWriter::new(socket.try_clone()?, destination, settings.framing);
+                sh.attach(idx, Writer::Udp(writer));
+            } else {
+                counters.clear_error();
+                counters.connected.store(true, Ordering::Relaxed);
+            }
+            Ok::<_, io::Error>(socket)
+        })();
+
+        match setup {
+            Ok(socket) => {
+                while !sh.stopped() {
+                    match socket.recv_from(&mut buffer) {
+                        Ok((count, _)) if settings.receive && count > 0 => sh.route(idx, &buffer[..count]),
+                        Ok(_) => {}
+                        Err(error) if is_transient(&error) => {}
+                        Err(error) => {
+                            // Winsock reports ICMP Port Unreachable on the next receive.
+                            if cfg!(windows) && error.raw_os_error() == Some(10054) {
+                                continue;
+                            }
+                            counters.set_error(format!("UDP receive failed on {bind}: {error}"));
+                            break;
+                        }
+                    }
+                }
+                sh.detach(idx);
+            }
+            Err(error) => counters.set_error(format!("cannot open UDP socket on {bind}: {error}")),
+        }
+        if !sh.stopped() {
+            sh.sleep(RETRY_DELAY);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,6 +908,49 @@ mod tests {
             assert!(Instant::now() < deadline, "endpoints did not connect");
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn bridge_forwards_bytes_between_tcp_and_udp() {
+        let peer = UdpSocket::bind("127.0.0.1:0").unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let port = free_port();
+        let local = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = local.local_addr().unwrap();
+        drop(local);
+
+        let spec = HubSpec {
+            id: "udp-test".into(),
+            name: "UDP test".into(),
+            kind: HubKind::Bridge,
+            master: ep(EndpointSpec::TcpServer {
+                bind: format!("127.0.0.1:{port}"),
+            }),
+            members: vec![ep(EndpointSpec::Udp {
+                settings: crate::model::UdpSettings {
+                    bind: address.to_string(),
+                    destination: peer.local_addr().unwrap().to_string(),
+                    receive: true,
+                    framing: crate::model::UdpFraming::Raw,
+                },
+            })],
+            autostart: false,
+        };
+        let hub = HubRuntime::start(&spec, Arc::new(crate::driver::demo::DemoDriver::new()));
+        let mut tcp = connect(port);
+        wait_connected(&hub, 2);
+        let mut buffer = [0; 3];
+        tcp.write_all(b"\0\xFFx").unwrap();
+        let mut received = Vec::new();
+        while received.len() < buffer.len() {
+            let (count, source) = peer.recv_from(&mut buffer).unwrap();
+            assert_eq!(source, address);
+            received.extend_from_slice(&buffer[..count]);
+        }
+        assert_eq!(received, b"\0\xFFx");
+        peer.send_to(b"ack", address).unwrap();
+        tcp.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"ack");
     }
 
     /// A split hub built from TCP servers: master data reaches every member,
@@ -761,9 +1046,11 @@ mod tests {
             null_modem: false,
             stop: AtomicBool::new(false),
             holdable,
-            writers: (0..n).map(|_| Mutex::new(None)).collect(),
+            sources_only: vec![false; n],
+            outboxes: (0..n).map(|_| Outbox::default()).collect(),
             counters: (0..n).map(|_| Counters::default()).collect(),
             monitor: Mutex::new(Monitor::default()),
+            captures: (0..n).map(|_| Mutex::new(None)).collect(),
         }
     }
 
@@ -780,6 +1067,8 @@ mod tests {
         // Member 1 is full: it loses the data, member 2 still gets it.
         ports[1].full.store(true, Ordering::Relaxed);
         sh.route(0, b"device");
+        assert!(sh.write_next(1, false));
+        assert!(sh.write_next(2, false));
         assert_eq!(calls(&ports[1]), (1, 0));
         assert_eq!(calls(&ports[2]), (1, 0));
         let status: Vec<EndpointStatus> = sh.counters.iter().map(Counters::snapshot).collect();
@@ -788,6 +1077,7 @@ mod tests {
 
         // A program's data can be held back, so it may wait as before.
         sh.route(2, b"program");
+        assert!(sh.write_next(0, false));
         assert_eq!(calls(&ports[0]), (0, 1));
     }
 
@@ -801,6 +1091,7 @@ mod tests {
         // Dropping is a warning, not an error.
         port.full.store(true, Ordering::Relaxed);
         sh.route(0, b"lost");
+        assert!(sh.write_next(1, false));
         assert_eq!(
             status(&sh).warning.as_deref(),
             Some("program not reading; data is being dropped")
@@ -810,13 +1101,82 @@ mod tests {
         // Data flows again: the warning goes, the dropped count stays.
         port.full.store(false, Ordering::Relaxed);
         sh.route(0, b"kept");
+        assert!(sh.write_next(1, false));
         assert_eq!(status(&sh).warning, None);
         assert_eq!((status(&sh).tx_bytes, status(&sh).dropped_bytes), (4, 4));
 
         // The endpoint's own problem is not cleared by data flowing.
         sh.counters[1].set_error("connection lost: reset".into());
         sh.route(0, b"more");
+        assert!(sh.write_next(1, false));
         assert_eq!(status(&sh).last_error.as_deref(), Some("connection lost: reset"));
+    }
+
+    #[test]
+    fn slow_split_output_does_not_delay_healthy_output_or_replay_on_reconnect() {
+        use std::sync::mpsc;
+
+        struct BlockedWriter {
+            entered: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+
+        impl Write for BlockedWriter {
+            fn write(&mut self, _data: &[u8]) -> io::Result<usize> {
+                self.entered.send(()).unwrap();
+                self.release
+                    .recv_timeout(Duration::from_secs(5))
+                    .map_err(io::Error::other)?;
+                Ok(2)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let sh = shared(HubKind::Split, vec![true; 3]);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        sh.attach(
+            1,
+            Writer::Stream(Box::new(BlockedWriter {
+                entered: entered_tx,
+                release: release_rx,
+            })),
+        );
+        let healthy = Arc::new(Recorder::default());
+        sh.attach(2, Writer::Channel(healthy.clone()));
+        sh.route(0, b"aa");
+
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(|| sh.write_next(1, false));
+            entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(sh.write_next(2, false));
+
+            let sample = [0_u8; 4096];
+            for _ in 0..=OUTBOX_MAX_BYTES / sample.len() {
+                sh.route(0, &sample);
+                assert!(sh.write_next(2, false));
+            }
+            assert_eq!(sh.counters[2].snapshot().dropped_bytes, 0);
+            assert_eq!(sh.counters[1].snapshot().dropped_bytes, sample.len() as u64);
+
+            sh.detach(1);
+            let reconnected = Arc::new(Recorder::default());
+            sh.attach(1, Writer::Channel(reconnected.clone()));
+            sh.route(0, b"new");
+            release_tx.send(()).unwrap();
+            assert!(writer.join().unwrap());
+            assert_eq!(
+                sh.counters[1].snapshot().dropped_bytes,
+                (OUTBOX_MAX_BYTES + sample.len()) as u64
+            );
+            assert!(sh.write_next(1, false));
+            assert!(!sh.write_next(1, false));
+            assert_eq!(calls(&reconnected), (0, 1));
+            assert_eq!(sh.counters[1].snapshot().tx_bytes, 5);
+        });
     }
 
     /// A virtual port whose program's lines the test sets. Records what the

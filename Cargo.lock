@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "serialloom"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "parking_lot",
  "serde",
@@ -3165,11 +3165,13 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tracing",
+ "webview2-com",
+ "windows-core",
 ]
 
 [[package]]
 name = "serialloom-cli"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3179,8 +3181,10 @@ dependencies = [
 
 [[package]]
 name = "serialloom-core"
-version = "0.4.0"
+version = "0.4.2"
 dependencies = [
+ "chrono",
+ "libc",
  "parking_lot",
  "serde",
  "serde_json",

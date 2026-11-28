@@ -163,7 +163,7 @@ function HubInspector({ hub }: { hub: HubView }) {
                     />
                     <span className="font-mono text-sm font-semibold text-ink-0">{endpointTitle(e)}</span>
                     {i === 0 && <span className="chip bg-ink-700 text-ink-200">{t("inspector.master")}</span>}
-                    <span className="ml-auto truncate text-[11px] text-ink-400">{endpointSubtitle(e, st)}</span>
+                    <span className="ml-auto truncate text-[11px] text-ink-400">{endpointSubtitle(e, status.running, st)}</span>
                     {i > 0 && spec.kind !== "bridge" && spec.members.length > 1 && (
                       <button
                         className="text-ink-500 hover:text-rose-300"

@@ -11,6 +11,7 @@ keywords = ["serial", "com-port", "virtual-serial-port", "rs232", "splitter"]
 categories = ["hardware-support", "network-programming"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -21,6 +22,9 @@ uuid = { version = "1", features = ["v4"] }
 serialloom-proto = { path = "../serialloom-proto" }
 sha2 = "0.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 sha2 = "0.10"

@@ -1,5 +1,5 @@
-import { memo } from "react";
-import { Handle, Position, type NodeProps } from "@xyflow/react";
+import { memo, useLayoutEffect } from "react";
+import { Handle, Position, useUpdateNodeInternals, type NodeProps } from "@xyflow/react";
 import { ArrowLeftRight, Merge, Play, RadioTower, Split, Square } from "lucide-react";
 import clsx from "clsx";
 import type { HubNode as HubNodeType } from "../graph";
@@ -16,11 +16,21 @@ export const HUB_ICON: Record<HubKind, typeof Split> = {
   bus: RadioTower,
 };
 
-function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
+function HubNodeImpl({ id, data, selected }: NodeProps<HubNodeType>) {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const mirrored = data.mirrored;
+
+  useLayoutEffect(() => {
+    updateNodeInternals(id);
+  }, [id, mirrored, updateNodeInternals]);
+
   const { spec, status } = data.hub;
   const Icon = HUB_ICON[spec.kind];
   const run = useStore((s) => s.run);
   const t = useT();
+  const summary = `${hubLabel(spec.kind)} · ${t("node.ends", { count: spec.members.length + 1 })}`;
+  const runningState = t(status.running ? "common.running" : "common.stopped");
+  const rate = formatRate(data.totalRate);
 
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -31,13 +41,15 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
   return (
     <div
       data-hub-id={spec.id}
+      data-mirror-hub={spec.id}
+      title={[spec.name, summary, runningState].join("\n")}
       className={clsx(
         "w-[224px] rounded-2xl border bg-ink-800/95 px-3 py-2.5 shadow-xl shadow-black/40",
         selected ? "border-loom-400" : "border-ink-600",
       )}
       style={{ boxShadow: status.running ? `0 0 0 1px ${data.color}33, 0 0 28px -6px ${data.color}66` : undefined }}
     >
-      <Handle id="l" type="target" position={Position.Left} style={{ background: data.color }} />
+      <Handle id="l" type="target" position={mirrored ? Position.Right : Position.Left} style={{ background: data.color }} />
       <div className="flex items-center gap-2.5">
         <div
           className="grid h-9 w-9 shrink-0 place-items-center rounded-xl"
@@ -48,7 +60,7 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-ink-0">{spec.name}</div>
           <div className="truncate text-[11px]" style={{ color: data.color }}>
-            {hubLabel(spec.kind)} · {t("node.ends", { count: spec.members.length + 1 })}
+            {summary}
           </div>
         </div>
         <button
@@ -66,11 +78,11 @@ function HubNodeImpl({ data, selected }: NodeProps<HubNodeType>) {
       </div>
       <div className="mt-2 flex items-center justify-between text-[10.5px] text-ink-300">
         <span className={status.running ? "text-emerald-300" : "text-ink-400"}>
-          {status.running ? `● ${t("common.running")}` : `○ ${t("common.stopped")}`}
+          {status.running ? "●" : "○"} {runningState}
         </span>
-        <span className="font-mono">{formatRate(data.totalRate)}</span>
+        <span className="font-mono">{rate}</span>
       </div>
-      <Handle id="r" type="source" position={Position.Right} style={{ background: data.color }} />
+      <Handle id="r" type="source" position={mirrored ? Position.Left : Position.Right} style={{ background: data.color }} />
     </div>
   );
 }

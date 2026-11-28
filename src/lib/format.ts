@@ -31,6 +31,10 @@ export function specTitle(s: EndpointSpec | EndpointRequest): string {
       return `:${s.bind.split(":").pop()}`;
     case "tcpClient":
       return s.address;
+    case "udp":
+      return s.settings.receive ? s.settings.bind : s.settings.destination;
+    case "replay":
+      return s.settings.path.split(/[\\/]/).pop() || t(`editor.${s.settings.format}`);
     case "newVirtual":
       return s.name === "COM#" ? t("endpoint.autoCom") : s.name;
   }
@@ -51,7 +55,7 @@ export function speedMismatch(endpoints: HubEndpoint[], statuses: EndpointStatus
   return speeds.map((s) => `${s.port} ${s.baud}`).join(", ");
 }
 
-export function endpointSubtitle(e: HubEndpoint, status?: EndpointStatus): string {
+export function endpointSubtitle(e: HubEndpoint, running: boolean, status?: EndpointStatus): string {
   const s = e.spec;
   switch (s.kind) {
     case "serial":
@@ -62,9 +66,13 @@ export function endpointSubtitle(e: HubEndpoint, status?: EndpointStatus): strin
         ? t("endpoint.app", { baud: status.line.baudRate, framing: status.line.framing })
         : t("endpoint.appConnected");
     case "tcpServer":
-      return t("endpoint.listen", { bind: s.bind });
+      return running ? t("endpoint.listen", { bind: s.bind }) : `${t("common.stopped")} · ${s.bind}`;
     case "tcpClient":
       return t("endpoint.tcpClient");
+    case "udp":
+      return s.settings.destination ? `UDP → ${s.settings.destination}` : "UDP";
+    case "replay":
+      return t(`editor.${s.settings.format}`);
   }
 }
 
@@ -87,8 +95,11 @@ export function hubDescription(kind: HubKind): string {
   return t(`hub.${kind}.describe`);
 }
 
-export function hex(bytes: number[]): string {
-  return bytes.map((b) => b.toString(16).padStart(2, "0")).join(" ");
+export function hex(bytes: number[], prefixed = false): string {
+  return bytes.map((byte) => {
+    const value = byte.toString(16).padStart(2, "0");
+    return prefixed ? `0x${value.toUpperCase()}` : value;
+  }).join(" ");
 }
 
 export function ascii(bytes: number[]): string {

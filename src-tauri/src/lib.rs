@@ -1,3 +1,5 @@
+#[cfg(windows)]
+mod topology_menu;
 mod automation;
 mod commands;
 mod tray;
@@ -74,6 +76,10 @@ pub fn run() {
                 })?;
 
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(windows)]
+                topology_menu::install(&window);
+                #[cfg(debug_assertions)]
+                let _ = window.set_title("SerialLoom [DEV]");
                 fit_to_work_area(&window);
                 // The window starts hidden (tauri.conf.json) so a background
                 // start never flashes it.
@@ -116,6 +122,7 @@ pub fn run() {
             commands::create_virtual_ports,
             commands::rename_virtual_port,
             commands::remove_virtual_port,
+            commands::save_topology_backup,
             commands::list_hubs,
             commands::create_hub,
             commands::start_hub,
@@ -125,6 +132,9 @@ pub fn run() {
             commands::add_member,
             commands::remove_member,
             commands::hub_monitor,
+            commands::open_trace_window,
+            commands::capture_link,
+            commands::capture_usb_probe,
             commands::automation_info,
             commands::helper_status,
             commands::install_helper,

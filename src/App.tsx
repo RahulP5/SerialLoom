@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Cable,
   CircleAlert,
@@ -14,12 +14,16 @@ import {
   RefreshCw,
   Settings,
   Sun,
+  Upload,
   Workflow,
   X,
 } from "lucide-react";
 import clsx from "clsx";
 import { useStore, type View } from "./store";
 import { api, openExternal } from "./lib/api";
+import { exportTopology, importTopology } from "./lib/topologyBackup";
+import { loadMirroredHubs, loadPositions, saveMirroredHubs, savePositions } from "./lib/topologyPositions";
+import { buildGraph } from "./components/graph";
 import { useTheme } from "./lib/theme";
 import { useUpdateChecks, useUpdates } from "./lib/updates";
 import { WEBSITE } from "./lib/project";
@@ -32,11 +36,16 @@ import { Inspector } from "./components/Inspector";
 import { HubWizard } from "./components/dialogs/HubWizard";
 import { AddMemberDialog, DiagnosticsDialog, PairDialog, VirtualPortDialog } from "./components/dialogs/SimpleDialogs";
 
-const NAV: { id: View; label: MessageKey; icon: typeof Workflow }[] = [
+type NavItem = { label: MessageKey; icon: typeof Workflow } &
+  ({ id: View } | { action: "import" | "export" });
+
+const NAV: NavItem[] = [
   { id: "topology", label: "nav.topology", icon: Workflow },
   { id: "ports", label: "nav.ports", icon: List },
   { id: "virtual", label: "nav.virtual", icon: Cable },
   { id: "settings", label: "nav.settings", icon: Settings },
+  { action: "import", label: "topology.import", icon: Download },
+  { action: "export", label: "topology.export", icon: Upload },
   { id: "about", label: "nav.about", icon: Info },
 ];
 
@@ -69,6 +78,7 @@ function useTrayLanguage() {
 
 export default function App() {
   const { view, init, refresh } = useStore();
+  const [layoutVersion, setLayoutVersion] = useState(0);
   // Re-render everything when the language changes.
   useI18n((s) => s.lang);
   useTrayLanguage();
@@ -84,12 +94,12 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      <Sidebar />
+      <Sidebar onTopologyImported={() => setLayoutVersion((version) => version + 1)} />
       <main className="flex min-w-0 flex-1 flex-col">
         <DriverBanner />
         <div className="flex min-h-0 flex-1">
           <div className="min-w-0 flex-1">
-            {view === "topology" && <TopologyView />}
+            {view === "topology" && <TopologyView key={layoutVersion} />}
             {view === "ports" && <PortsView />}
             {view === "virtual" && <VirtualPortsView />}
             {view === "settings" && <SettingsView />}
@@ -128,12 +138,42 @@ function Tip({ text, show }: { text: string; show: boolean }) {
   );
 }
 
-function Sidebar() {
-  const { view, setView, refresh, hubs, info } = useStore();
+function Sidebar({ onTopologyImported }: { onTopologyImported: () => void }) {
+  const { view, setView, refresh, hubs, info, run, toast } = useStore();
+  const backupInput = useRef<HTMLInputElement>(null);
   const running = hubs.filter((h) => h.status.running).length;
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const t = useT();
   useUpdateChecks(info?.version);
+
+  const saveBackup = () => run(t("topology.export"), async () => {
+    const { hubs, ports, rates } = useStore.getState();
+    const saved = loadPositions();
+    const mirroredHubs = loadMirroredHubs();
+    const { nodes } = buildGraph(hubs, ports, rates, mirroredHubs);
+    const positions = Object.fromEntries(nodes.map(({ id, position }) => [id, saved[id] ?? position]));
+    if (await exportTopology(positions, mirroredHubs)) toast("success", t("topology.backupExported"));
+  });
+
+  const loadBackup = (file: File) => run(t("topology.import"), async () => {
+    const { positions, mirroring } = await importTopology(await file.text());
+    savePositions({ ...loadPositions(), ...positions });
+    if (mirroring.size) {
+      const mirroredHubs = loadMirroredHubs();
+      for (const [id, mirrored] of mirroring) {
+        if (mirrored) mirroredHubs.add(id);
+        else mirroredHubs.delete(id);
+      }
+      saveMirroredHubs(mirroredHubs);
+    }
+    onTopologyImported();
+    toast("success", t("topology.backupImported"));
+  });
+
+  const backupActions = {
+    import: () => backupInput.current?.click(),
+    export: () => void saveBackup(),
+  };
 
   const toggle = useCallback(
     () =>
@@ -185,23 +225,37 @@ function Sidebar() {
         )}
       </div>
       <div className="space-y-0.5 px-2">
-        {NAV.map((n) => (
-          <button
-            key={n.id}
-            onClick={() => setView(n.id)}
-            aria-current={view === n.id ? "page" : undefined}
-            aria-label={collapsed ? t(n.label) : undefined}
-            className={clsx(
-              item,
-              collapsed ? "justify-center px-0" : "px-3",
-              view === n.id ? "bg-ink-700/70 text-ink-0" : "text-ink-300 hover:bg-ink-800 hover:text-ink-100",
-            )}
-          >
-            <n.icon size={collapsed ? 18 : 16} className={clsx("shrink-0", view === n.id && "text-cyan-300")} />
-            {!collapsed && <span className="whitespace-nowrap">{t(n.label)}</span>}
-            <Tip text={t(n.label)} show={collapsed} />
-          </button>
-        ))}
+        <input
+          ref={backupInput}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) void loadBackup(file);
+          }}
+        />
+        {NAV.map((n) => {
+          const active = "id" in n && view === n.id;
+          return (
+            <button
+              key={n.label}
+              onClick={"id" in n ? () => setView(n.id) : backupActions[n.action]}
+              aria-current={active ? "page" : undefined}
+              aria-label={collapsed ? t(n.label) : undefined}
+              className={clsx(
+                item,
+                collapsed ? "justify-center px-0" : "px-3",
+                active ? "bg-ink-700/70 text-ink-0" : "text-ink-300 hover:bg-ink-800 hover:text-ink-100",
+              )}
+            >
+              <n.icon size={collapsed ? 18 : 16} className={clsx("shrink-0", active && "text-cyan-300")} />
+              {!collapsed && <span className="whitespace-nowrap">{t(n.label)}</span>}
+              <Tip text={t(n.label)} show={collapsed} />
+            </button>
+          );
+        })}
       </div>
       <div className="mt-auto px-2 pb-1">
         <button

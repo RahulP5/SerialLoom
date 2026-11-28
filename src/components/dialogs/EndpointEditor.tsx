@@ -1,16 +1,29 @@
+import { open } from "@tauri-apps/plugin-dialog";
+import { inTauri } from "../../lib/api";
 import { Trash } from "lucide-react";
 import { useStore } from "../../store";
-import { DEFAULT_SERIAL, type EndpointRequest, type SerialSettings } from "../../lib/types";
+import { DEFAULT_SERIAL, DEFAULT_GPS, FILE_FORMATS, SOURCE_FORMATS, isGps, type GpsSettings, type SourceFormat, type EndpointRequest, type ReplayFormat, type ReplaySettings, type SerialSettings } from "../../lib/types";
 import { useT } from "../../i18n";
 
 const BAUDS = [300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
-type Kind = EndpointRequest["kind"];
+type Kind = Exclude<EndpointRequest["kind"], "replay"> | SourceFormat;
 
-const KINDS: Kind[] = ["newVirtual", "virtual", "serial", "tcpServer", "tcpClient"];
+export function replaySource(format: ReplayFormat): EndpointRequest {
+  return { kind: "replay", settings: {
+    path: "", format, ...(isGps(format) ? { gps: DEFAULT_GPS } : {}), repeat: true, timestamped: format === "nmea2000",
+    bytesPerSecond: format === "nmea2000" ? 11520 : 480, cycleMs: 1000, linesPerCycle: 1,
+  } };
+}
+
+const KINDS: Kind[] = ["newVirtual", "virtual", "serial", "tcpServer", "tcpClient", "udp", ...SOURCE_FORMATS];
 
 export function defaultFor(kind: Kind, firstFree?: string): EndpointRequest {
   switch (kind) {
+    case "file":
+    case "gps0183":
+    case "gps2000":
+      return replaySource(kind);
     case "newVirtual":
       return { kind, name: "COM#" };
     case "virtual":
@@ -21,6 +34,8 @@ export function defaultFor(kind: Kind, firstFree?: string): EndpointRequest {
       return { kind, bind: "0.0.0.0:7000" };
     case "tcpClient":
       return { kind, address: "192.168.1.20:4001" };
+    case "udp":
+      return { kind, settings: { bind: "127.0.0.1:10110", destination: "", receive: true, framing: "raw" } };
   }
 }
 
@@ -60,7 +75,7 @@ export function EndpointEditor({
     <div className="rounded-xl border border-ink-700 bg-ink-900/60 p-3">
       <div className="flex items-center gap-2">
         {label && <span className="w-20 shrink-0 text-xs font-semibold text-ink-300">{label}</span>}
-        <select className="input w-56 shrink-0" value={value.kind} onChange={(e) => switchKind(e.target.value as Kind)}>
+        <select className="input w-56 shrink-0" value={value.kind === "replay" ? (isGps(value.settings.format) ? value.settings.format : "file") : value.kind} onChange={(e) => switchKind(e.target.value as Kind)}>
           {KINDS.map((k) => (
             <option key={k} value={k}>
               {t(`editor.${k}`)}
@@ -105,6 +120,39 @@ export function EndpointEditor({
           </button>
         )}
       </div>
+      {value.kind === "udp" && (
+        <div className="mt-2 flex flex-wrap gap-3">
+          <label className="flex items-center gap-2 text-xs">
+            {t("udp.local")}
+            <input className="input w-44 font-mono" value={value.settings.bind} placeholder="127.0.0.1:10110"
+              spellCheck={false} onChange={(e) => onChange({ ...value, settings: { ...value.settings, bind: e.target.value } })} />
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={value.settings.receive}
+              onChange={(e) => onChange({ ...value, settings: { ...value.settings, receive: e.target.checked } })} />
+            {t("udp.receive")}
+          </label>
+          <label className="flex items-center gap-2 text-xs">
+            {t("udp.destination")}
+            <input className="input w-44 font-mono" value={value.settings.destination} placeholder="127.0.0.1:10110"
+              spellCheck={false} onChange={(e) => onChange({ ...value, settings: { ...value.settings, destination: e.target.value } })} />
+          </label>
+          {!!value.settings.destination.trim() && (
+            <label className="flex items-center gap-2 text-xs">
+              {t("udp.framing")}
+              <select className="input w-auto" value={value.settings.framing}
+                onChange={(e) => onChange({ ...value, settings: { ...value.settings,
+                  framing: e.target.value === "nmea0183" ? "nmea0183" : "raw" } })}>
+                <option value="raw">{t("replay.raw")}</option>
+                <option value="nmea0183">{t("editor.nmea0183")}</option>
+              </select>
+            </label>
+          )}
+        </div>
+      )}
+      {value.kind === "replay" && (
+        <ReplaySettingsRow value={value.settings} onChange={(settings) => onChange({ kind: "replay", settings })} />
+      )}
       {value.kind === "serial" && (
         <SerialSettingsRow value={value.settings} onChange={(settings) => onChange({ ...value, settings })} indent={!!label} />
       )}
@@ -113,6 +161,91 @@ export function EndpointEditor({
           {t("editor.virtualNote")}
         </p>
       )}
+    </div>
+  );
+}
+
+function ReplaySettingsRow({ value, onChange }: {
+  value: ReplaySettings;
+  onChange: (settings: ReplaySettings) => void;
+}) {
+  const t = useT();
+  const { toast } = useStore();
+  const raw = value.format === "file" || (value.format === "nmea2000" && !value.timestamped);
+  const numeric = (key: "bytesPerSecond" | "cycleMs" | "linesPerCycle", label: string, max: number) => (
+    <label className="flex items-center gap-2 text-xs">
+      {label}
+      <input type="number" className="input w-28" min={1} max={max} step={1}
+        value={value[key]} onChange={(event) => onChange({ ...value, [key]: Number(event.target.value) })} />
+    </label>
+  );
+
+  if (isGps(value.format)) {
+    const gps = value.gps ?? DEFAULT_GPS;
+    const fields: (keyof GpsSettings)[] = ["latitude", "longitude", "course", "speed"];
+    return (
+      <div className="mt-2 flex flex-wrap gap-3">
+        {fields.map((key) => (
+          <label key={key} className="flex items-center gap-2 text-xs">
+            {t(`gps.${key}`)}
+            <input className="input w-28" type="number" step="any" value={gps[key]}
+              onChange={(event) => onChange({ ...value, gps: { ...gps, [key]: event.target.value } })} />
+          </label>
+        ))}
+        {numeric("cycleMs", t("replay.cycle"), 60_000)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 space-y-2">
+      <label className="flex items-center gap-2 text-xs">
+        {t("replay.format")}
+        <select className="input w-auto" value={value.format}
+          onChange={(event) => {
+            const format = event.target.value as typeof FILE_FORMATS[number];
+            onChange({ ...value, format, timestamped: format === "nmea2000",
+              bytesPerSecond: format === "nmea2000" ? 11520 : 480 });
+          }}>
+          {FILE_FORMATS.map((format) => (
+            <option key={format} value={format}>{t(format === "file" ? "replay.raw" : `editor.${format}`)}</option>
+          ))}
+        </select>
+      </label>
+      <div className="flex gap-2">
+        <input className="input min-w-0 flex-1 font-mono" aria-label={t("replay.path")}
+          placeholder={t("replay.path")} value={value.path}
+          onChange={(event) => onChange({ ...value, path: event.target.value })} />
+        {inTauri && <button type="button" className="btn-outline" onClick={async () => {
+          try {
+            const path = await open({ multiple: false, directory: false });
+            if (typeof path === "string") onChange({ ...value, path });
+          } catch (error) {
+            toast("error", String(error));
+          }
+        }}>{t("replay.browse")}</button>}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={value.repeat}
+            onChange={(event) => onChange({ ...value, repeat: event.target.checked })} />
+          {t("replay.repeat")}
+        </label>
+        {value.format !== "file" && (
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={value.timestamped}
+              onChange={(event) => onChange({ ...value, timestamped: event.target.checked })} />
+            {t("replay.timestamped")}
+          </label>
+        )}
+        {raw && numeric("bytesPerSecond", t("replay.rate"), 1_000_000)}
+        {!raw && (!value.timestamped || value.repeat) &&
+          numeric("cycleMs", t(value.timestamped ? "replay.loopGap" : "replay.cycle"), 60_000)}
+        {value.format === "nmea0183" && !value.timestamped && numeric("linesPerCycle", t("replay.lines"), 256)}
+      </div>
+      {value.timestamped && <p className="text-xs text-ink-400">
+        {t(value.format === "nmea2000" ? "replay.hexFormat" : "replay.textFormat")}
+      </p>}
     </div>
   );
 }

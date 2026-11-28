@@ -11,6 +11,7 @@ use std::sync::Arc;
 use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 
+use crate::capture::{self, Capture, CaptureAction, CaptureRequest, CaptureStatus};
 use crate::config::{load_json, save_json};
 use crate::driver::{PortDriver, validate_port_name};
 use crate::error::{Error, Result};
@@ -29,6 +30,7 @@ struct Topology {
 struct HubEntry {
     spec: HubSpec,
     runtime: Option<HubRuntime>,
+    armed: HashMap<usize, std::result::Result<CaptureRequest, String>>,
 }
 
 impl HubEntry {
@@ -65,7 +67,11 @@ impl Engine {
         let hubs = topology
             .hubs
             .into_iter()
-            .map(|spec| HubEntry { spec, runtime: None })
+            .map(|spec| HubEntry {
+                spec,
+                runtime: None,
+                armed: HashMap::new(),
+            })
             .collect();
         Self {
             driver: RwLock::new(driver),
@@ -247,6 +253,44 @@ impl Engine {
         self.hubs.lock().iter().map(HubEntry::status).collect()
     }
 
+    pub fn capture_link(&self, id: &str, index: usize, action: CaptureAction) -> Result<CaptureStatus> {
+        let mut hubs = self.hubs.lock();
+        let idx = position(&hubs, id)?;
+        let entry = &mut hubs[idx];
+        if index >= entry.spec.endpoint_count() {
+            return Err(Error::Invalid("invalid capture endpoint".into()));
+        }
+        if let Some(runtime) = &entry.runtime {
+            if matches!(action, CaptureAction::Start(_)) {
+                entry.armed.remove(&index);
+            }
+            if let Some(error @ Err(_)) = entry.armed.get(&index) {
+                return Ok(capture::pending_status(Some(error)));
+            }
+            return runtime.capture(index, action);
+        }
+        match action {
+            CaptureAction::Start(request) => {
+                request.validate()?;
+                entry.armed.insert(index, Ok(request));
+            }
+            CaptureAction::Stop => {
+                entry.armed.remove(&index);
+            }
+            CaptureAction::CloseWindow => {
+                if entry
+                    .armed
+                    .get(&index)
+                    .is_some_and(|request| request.as_ref().is_ok_and(|r| r.path.is_none()))
+                {
+                    entry.armed.remove(&index);
+                }
+            }
+            CaptureAction::Status | CaptureAction::Summary => {}
+        }
+        Ok(capture::pending_status(entry.armed.get(&index)))
+    }
+
     pub fn monitor(&self, id: &str, after: u64) -> Result<Vec<MonitorRecord>> {
         let hubs = self.hubs.lock();
         let entry = find(&hubs, id)?;
@@ -281,7 +325,11 @@ impl Engine {
             autostart: req.autostart,
         };
         let id = spec.id.clone();
-        self.hubs.lock().push(HubEntry { spec, runtime: None });
+        self.hubs.lock().push(HubEntry {
+            spec,
+            runtime: None,
+            armed: HashMap::new(),
+        });
         self.save();
         if req.start {
             return self.start_hub(&id);
@@ -306,8 +354,21 @@ impl Engine {
                     )));
                 }
             }
-            let rt = HubRuntime::start(&hubs[idx].spec, driver);
-            hubs[idx].runtime = Some(rt);
+            let entry = &mut hubs[idx];
+            let mut captures = HashMap::new();
+            for (index, request) in std::mem::take(&mut entry.armed) {
+                if let Ok(request) = request {
+                    match Capture::start(request) {
+                        Ok(capture) => {
+                            captures.insert(index, capture);
+                        }
+                        Err(error) => {
+                            entry.armed.insert(index, Err(error.to_string()));
+                        }
+                    }
+                }
+            }
+            entry.runtime = Some(HubRuntime::start_with_captures(&entry.spec, driver, captures));
         }
         Ok(hubs[idx].view())
     }
@@ -401,6 +462,7 @@ impl Engine {
         let mut hubs = self.hubs.lock();
         let idx = position(&hubs, id)?;
         let was_running = hubs[idx].runtime.take().is_some();
+        hubs[idx].armed.clear();
         f(&mut hubs[idx].spec);
         if was_running {
             let rt = HubRuntime::start(&hubs[idx].spec, driver);
@@ -459,6 +521,15 @@ impl Engine {
                         },
                         false,
                     ),
+                    EndpointRequest::Udp { mut settings } => {
+                        settings.bind = settings.bind.trim().into();
+                        settings.destination = settings.destination.trim().into();
+                        (EndpointSpec::Udp { settings }, false)
+                    }
+                    EndpointRequest::Replay { mut settings } => {
+                        settings.path = settings.path.trim().into();
+                        (EndpointSpec::Replay { settings }, false)
+                    }
                     EndpointRequest::NewVirtual { .. } => {
                         let port = created.next().expect("one port per request").name;
                         (EndpointSpec::Virtual { port }, true)
@@ -566,6 +637,12 @@ fn validate_request(r: &EndpointRequest) -> Result<()> {
             .parse::<SocketAddr>()
             .map(|_| ())
             .map_err(|_| Error::Invalid(format!("'{bind}' is not a listen address such as 0.0.0.0:7000"))),
+        EndpointRequest::Udp { settings } => crate::udp::addresses(settings)
+            .map(|_| ())
+            .map_err(|error| Error::Invalid(error.to_string())),
+        EndpointRequest::Replay { settings } => {
+            crate::replay::validate(settings).map_err(|error| Error::Invalid(error.to_string()))
+        }
         EndpointRequest::TcpClient { address } => {
             let a = address.trim();
             match a.rsplit_once(':') {
@@ -626,6 +703,53 @@ mod tests {
             assert!(Instant::now() < deadline, "condition not met in time");
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn armed_capture_records_the_first_replay_bytes_on_start() {
+        use crate::capture::{Direction, FileFormat};
+
+        let (engine, _) = engine();
+        let path = std::env::temp_dir().join(format!("serialloom-first-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"first").unwrap();
+        let mut request = split_request();
+        request.master = EndpointRequest::Replay {
+            settings: ReplaySettings {
+                path: path.to_string_lossy().into_owned(),
+                format: ReplayFormat::File,
+                gps: None,
+                repeat: false,
+                timestamped: false,
+                bytes_per_second: 1000,
+                lines_per_cycle: 1,
+                cycle_ms: 1000,
+            },
+        };
+        let id = engine.create_hub(request).unwrap().spec.id;
+        let start = || {
+            CaptureAction::Start(CaptureRequest {
+                direction: Direction::Rx,
+                seconds: 1,
+                path: None,
+                format: FileFormat::Hex,
+            })
+        };
+        let status =
+            || serde_json::to_value(engine.capture_link(&id, 0, CaptureAction::Status).unwrap()).unwrap();
+        engine.capture_link(&id, 0, start()).unwrap();
+        assert_eq!(status()["pending"], true);
+        engine.capture_link(&id, 0, CaptureAction::Stop).unwrap();
+        assert_eq!(status()["pending"], false);
+        engine.capture_link(&id, 0, start()).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+        assert_eq!(status()["pending"], true);
+        engine.start_hub(&id).unwrap();
+        wait_for(|| status()["records"].as_array().is_some_and(|r| !r.is_empty()));
+        let captured = status();
+        assert_eq!(captured["pending"], false);
+        assert_eq!(captured["records"][0]["bytes"], serde_json::json!(b"first"));
+        engine.stop_hub(&id).unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

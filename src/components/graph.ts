@@ -1,9 +1,10 @@
 import type { Edge, Node } from "@xyflow/react";
 import type { Rate } from "../store";
 import type { EndpointStatus, HubEndpoint, HubView, PortInfo, PortKind } from "../lib/types";
+import { isGps } from "../lib/types";
 import { endpointSubtitle, endpointTitle, HUB_COLOR } from "../lib/format";
 
-export type EndpointIcon = PortKind | "tcp";
+export type EndpointIcon = PortKind | "tcp" | "replay" | "gps";
 
 export interface EndpointNodeData extends Record<string, unknown> {
   title: string;
@@ -11,6 +12,7 @@ export interface EndpointNodeData extends Record<string, unknown> {
   icon: EndpointIcon;
   role: "master" | "member";
   hubId?: string;
+  mirrored: boolean;
   color: string;
   running: boolean;
   status?: EndpointStatus;
@@ -19,8 +21,17 @@ export interface EndpointNodeData extends Record<string, unknown> {
 
 export interface HubNodeData extends Record<string, unknown> {
   hub: HubView;
+  mirrored: boolean;
   color: string;
   totalRate: number;
+}
+
+export interface TraceLink {
+  id: string;
+  index: number;
+  source: string;
+  target: string;
+  forwardRx: boolean;
 }
 
 export interface TrafficEdgeData extends Record<string, unknown> {
@@ -31,6 +42,7 @@ export interface TrafficEdgeData extends Record<string, unknown> {
   color: string;
   running: boolean;
   dashed?: boolean;
+  trace?: TraceLink;
   label?: string;
 }
 
@@ -46,6 +58,7 @@ const ROW = 104;
 const GAP = 72;
 
 function iconFor(e: HubEndpoint, ports: PortInfo[]): EndpointIcon {
+  if (e.spec.kind === "replay") return isGps(e.spec.settings.format) ? "gps" : "replay";
   if (e.spec.kind === "virtual") return "virtual";
   if (e.spec.kind !== "serial") return "tcp";
   const name = e.spec.port.toUpperCase();
@@ -57,9 +70,12 @@ export function buildGraph(
   hubs: HubView[],
   ports: PortInfo[],
   rates: Record<string, Rate[]>,
-): { nodes: GraphNode[]; edges: TrafficEdge[] } {
+  mirroredHubs: ReadonlySet<string> = new Set(),
+): { nodes: GraphNode[]; edges: Edge[] } {
   const nodes: GraphNode[] = [];
-  const edges: TrafficEdge[] = [];
+  const edges: Edge[] = [];
+  const tcpServers = new Map<string, { id: string; connected: boolean }[]>();
+  const tcpClients: { id: string; address: string; isMaster: boolean; connected: boolean; rate: Rate; trace: TraceLink }[] = [];
   let y = 0;
 
   for (const hub of hubs) {
@@ -70,17 +86,19 @@ export function buildGraph(
     const bandHeight = rows * ROW;
     const centerY = y + (bandHeight - ROW) / 2;
     const all = [spec.master, ...spec.members];
+    const mirrored = mirroredHubs.has(spec.id);
 
     const epNode = (e: HubEndpoint, i: number, x: number, ny: number): EndpointNode => ({
       id: `${spec.id}:${i}`,
       type: "endpoint",
-      position: { x, y: ny },
+      position: { x: mirrored ? 2 * X_HUB + 4 - x : x, y: ny },
       data: {
         title: endpointTitle(e),
-        subtitle: endpointSubtitle(e, status.endpoints[i]),
+        subtitle: endpointSubtitle(e, status.running, status.endpoints[i]),
         icon: iconFor(e, ports),
         role: i === 0 ? "master" : "member",
         hubId: spec.id,
+        mirrored,
         color,
         running: status.running,
         status: status.endpoints[i],
@@ -95,14 +113,33 @@ export function buildGraph(
       position: { x: X_HUB, y: centerY + 4 },
       data: {
         hub,
+        mirrored,
         color,
         totalRate: hubRates.reduce((acc, r) => acc + r.rx, 0),
       },
     });
     spec.members.forEach((m, j) => nodes.push(epNode(m, j + 1, X_MEMBER, y + j * ROW)));
 
-    all.forEach((_, i) => {
+    all.forEach((entry, i) => {
+      const endpoint = entry.spec;
+      const title = endpointTitle(entry);
+      const id = `${spec.id}:${i}`;
       const r = hubRates[i] ?? { rx: 0, tx: 0 };
+      const connected = status.running && status.endpoints[i]?.connected === true;
+      if (endpoint.kind === "tcpServer") {
+        const address = endpoint.bind.trim().toLowerCase();
+        if (address) {
+          const servers = tcpServers.get(address) ?? [];
+          servers.push({ id, connected });
+          tcpServers.set(address, servers);
+        }
+      } else if (endpoint.kind === "tcpClient") {
+        tcpClients.push({
+          id, address: endpoint.address.trim().toLowerCase(), isMaster: i === 0, connected, rate: r,
+          trace: { id: spec.id, index: i, source: "", target: title, forwardRx: true },
+        });
+      }
+
       const isMaster = i === 0;
       edges.push({
         id: `e:${spec.id}:${i}`,
@@ -113,6 +150,12 @@ export function buildGraph(
         targetHandle: "l",
         // Source → target is "into the hub" for the master, "out to the port" for members.
         data: {
+          trace: {
+            id: spec.id, index: i,
+            source: isMaster ? title : spec.name,
+            target: isMaster ? spec.name : title,
+            forwardRx: isMaster,
+          },
           forward: isMaster ? r.rx : r.tx,
           backward: isMaster ? r.tx : r.rx,
           color,
@@ -122,6 +165,33 @@ export function buildGraph(
     });
 
     y += bandHeight + GAP;
+  }
+
+  // TCP links represent configured targets, even when either connection is stopped.
+  for (const { id, address, isMaster, connected, rate, trace } of tcpClients) {
+    const servers = tcpServers.get(address);
+    if (servers?.length !== 1) continue;
+    const [server] = servers;
+    edges.push({
+      id: `tcp:${server.id}:${id}`,
+      type: "traffic",
+      source: server.id,
+      target: id,
+      sourceHandle: "r",
+      // The hub uses the right handle of a master and the left handle of a member.
+      targetHandle: isMaster ? "l" : "r",
+      selectable: false,
+      ariaLabel: `TCP ${address}`,
+      data: {
+        // This edge runs from server to client, so client RX is forward.
+        forward: rate.rx,
+        backward: rate.tx,
+        color: "#34d399",
+        running: server.connected && connected,
+        dashed: true,
+        trace: { ...trace, source: address },
+      },
+    });
   }
 
   return { nodes, edges };

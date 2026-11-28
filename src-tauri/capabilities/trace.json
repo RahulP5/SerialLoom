@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "trace",
+  "description": "Permissions for interactive trace windows",
+  "windows": ["trace-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-set-theme",
+    "dialog:allow-save"
+  ]
+}

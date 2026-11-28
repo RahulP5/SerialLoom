@@ -115,6 +115,12 @@ pub(crate) struct Capture {
     queue: SyncSender<Record>,
 }
 
+impl CaptureStatus {
+    pub fn idle() -> Self {
+        status(None, false)
+    }
+}
+
 pub(crate) fn status(capture: Option<&Capture>, include_records: bool) -> CaptureStatus {
     capture.map_or_else(
         || CaptureStatus {
@@ -234,7 +240,7 @@ impl Capture {
                 };
                 drop(file);
                 worker_stop.store(true, Relaxed);
-                worker_output.lock().end = Some(end);
+                worker_output.lock().end.get_or_insert(end);
             })?;
         Ok(Self {
             direction,
@@ -249,6 +255,10 @@ impl Capture {
     }
 
     pub(crate) fn record(&self, direction: Direction, bytes: &[u8]) {
+        self.record_at(direction, bytes, SystemTime::now());
+    }
+
+    pub(crate) fn record_at(&self, direction: Direction, bytes: &[u8], time: SystemTime) {
         if (self.direction != Direction::Both && self.direction != direction)
             || self.stop.load(Relaxed)
             || Instant::now() >= self.deadline
@@ -256,7 +266,7 @@ impl Capture {
             return;
         }
         let record = Record {
-            time: SystemTime::now(),
+            time,
             elapsed_ms: self.start.elapsed().as_millis() as u64,
             direction,
             bytes: bytes.to_vec(),
@@ -278,7 +288,13 @@ impl Capture {
         self.is_file
     }
 
-    fn status(&self, include_records: bool) -> CaptureStatus {
+    #[cfg(windows)]
+    pub(crate) fn fail(&self, message: String) {
+        self.output.lock().end = Some(("write", Some(message)));
+        self.stop();
+    }
+
+    pub(crate) fn status(&self, include_records: bool) -> CaptureStatus {
         let output = self.output.lock();
         let (reason, detail) = output
             .end

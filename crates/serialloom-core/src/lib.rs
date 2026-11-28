@@ -34,3 +34,6 @@ pub mod winpipe;
 
 pub use engine::Engine;
 pub use error::{Error, Result};
+
+#[cfg(any(windows, test))]
+pub mod usb_probe;

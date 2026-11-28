@@ -3,9 +3,11 @@ import { emit } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useT } from "../../i18n";
 import { ascii, hex } from "../../lib/format";
-import { capture, traceChanged, traceTime, type Direction, type FileFormat, type TraceOptions, type TraceRecord, type TraceStatus } from "../../lib/trace";
+import { capture, captureUsb, traceChanged, traceTime, type Direction, type FileFormat, type TraceOptions, type TraceRecord, type TraceStatus } from "../../lib/trace";
 
 const columnKeys = ["trace.utc", "trace.delta", "trace.direction", "trace.bytes", "trace.preview"] as const;
+const modemSignals = ["DCD", "CTS", "DSR", "RI", "DTR*", "RTS*"];
+const signalState = (value: boolean | null) => value === null ? "?" : value ? "1" : "0";
 const initialWidths = [158, 100, 80, 84, 440];
 
 function drag(event: PointerEvent<HTMLElement>, move: (x: number, y: number) => void) {
@@ -30,6 +32,8 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [paused, setPaused] = useState<TraceRecord[] | null>(null);
+  const [clearedThrough, setClearedThrough] = useState(0);
+  const [signalsClearedThrough, setSignalsClearedThrough] = useState(0);
   const [selected, setSelected] = useState<TraceRecord>();
   const [fileFormat, setFileFormat] = useState<FileFormat>("hex");
   const [hexMode, setHexMode] = useState(false);
@@ -37,7 +41,18 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
   const [widths, setWidths] = useState(initialWidths);
   const body = useRef<HTMLDivElement>(null);
   const table = useRef<HTMLDivElement>(null);
-  const records = paused ?? status?.records ?? [];
+  const liveRecords = status?.records ?? [];
+  const records = (paused ?? liveRecords).filter((record) => record.sequence > clearedThrough);
+  const signalChanges = status?.signals?.changes ?? [];
+  const signalTime = ([time]: (typeof signalChanges)[number]) =>
+    time.secs_since_epoch * 1000 + time.nanos_since_epoch / 1e6;
+  const visibleSignalChanges = signalChanges.filter((change) => signalTime(change) > signalsClearedThrough);
+  const clearTrace = () => {
+    setClearedThrough((previous) => Math.max(previous, liveRecords.at(-1)?.sequence ?? 0, records.at(-1)?.sequence ?? 0));
+    setSignalsClearedThrough((previous) => Math.max(previous, ...signalChanges.map(signalTime)));
+    if (paused) setPaused([]);
+    setSelected(undefined);
+  };
   const displayed = selected ?? records.at(-1);
   const engaged = status?.running || status?.pending;
   const canStart = !engaged && !busy;
@@ -49,7 +64,7 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
       if (pending) return;
       pending = true;
       try {
-        const next = await capture(options, { type: "status" });
+        const next = await (options.usbProbe ? captureUsb(options.id, { type: "status" }) : capture(options, { type: "status" }));
         if (active) setStatus(next);
       } catch (failure) {
         if (active) {
@@ -85,12 +100,17 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
         }) : null;
         if (fileMode && !path) return;
         setPaused(null);
+        setClearedThrough(0);
+        setSignalsClearedThrough(0);
         setSelected(undefined);
-        setStatus(await capture(options, { type: "start", direction, seconds, path, format: fileFormat }));
+        const action = { type: "start", direction, seconds, path, format: fileFormat } as const;
+        setStatus(await (options.usbProbe
+          ? captureUsb(options.id, action)
+          : capture(options, action)));
       } else {
-        setStatus(await capture(options, { type: "stop" }));
+        setStatus(await (options.usbProbe ? captureUsb(options.id, { type: "stop" }) : capture(options, { type: "stop" })));
       }
-      await emit(traceChanged, { id: options.id, index: options.index });
+      if (!options.usbProbe) await emit(traceChanged, { id: options.id, index: options.index });
     } catch (failure) {
       setError(String(failure));
     } finally {
@@ -108,6 +128,25 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
   return (
     <main className="flex h-dvh flex-col gap-3 overflow-hidden bg-ink-950 p-3 text-ink-100">
       <h1 className="truncate text-xl font-semibold">{options.source} ↔ {options.target}</h1>
+      {status?.signals && (
+        <details className="text-xs text-ink-300">
+          <summary className="cursor-pointer">
+            {modemSignals.map((name, index) => (
+              <span className="mr-3 font-mono" key={name}>{name} {signalState(status.signals!.levels[index])}</span>
+            ))}
+          </summary>
+          <p>{t("probe.commands")}</p>
+          <ol className="max-h-28 overflow-auto font-mono">
+            {visibleSignalChanges.map(([time, index, value], row) => (
+              <li key={row}>
+                {new Date(time.secs_since_epoch * 1000 + time.nanos_since_epoch / 1e6).toISOString().slice(11, 23)}
+                {" "}{modemSignals[index]} {signalState(value)}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+      {options.usbProbe && !status?.signals && <p className="text-xs text-ink-300">{t("probe.raw")}</p>}
       <div className="flex flex-wrap items-center gap-2 border-b border-ink-700 pb-2 text-sm">
         <select className="input w-auto" aria-label={t("trace.destination")} disabled={!canStart}
           value={fileMode ? "file" : "window"} onChange={(e) => setFileMode(e.target.value === "file")}>
@@ -117,8 +156,8 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
         <select className="input w-auto max-w-64" aria-label={t("trace.direction")} disabled={!canStart}
           value={direction} onChange={(e) => setDirection(e.target.value as Direction)}>
           <option value="both">{t("trace.both")}</option>
-          <option value={options.forwardRx ? "rx" : "tx"}>{options.source} → {options.target}</option>
-          <option value={options.forwardRx ? "tx" : "rx"}>{options.target} → {options.source}</option>
+          <option value={options.forwardRx ? "rx" : "tx"}>{options.usbProbe ? "USB → PC" : `${options.source} → ${options.target}`}</option>
+          <option value={options.forwardRx ? "tx" : "rx"}>{options.usbProbe ? "PC → USB" : `${options.target} → ${options.source}`}</option>
         </select>
         <select className="input w-auto" aria-label={t("trace.duration")} value={seconds}
           disabled={!canStart} onChange={(e) => setSeconds(Number(e.target.value))}>
@@ -130,6 +169,7 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
           <option value="text">{t("trace.text")}</option>
           <option value="both">{t("trace.text")} + {t("trace.hex")}</option>
         </select>}
+        {options.usbProbe && status?.running && !records.length && <span>{t("monitor.waiting")}</span>}
         {status?.pending && <span role="status" className="text-amber-400">{t("trace.pending")}</span>}
         {status?.running && <span className="font-mono text-rose-400">● REC {traceTime(status.remainingSeconds)}</span>}
         <button className="btn-outline" disabled={busy} onClick={() => void update(!engaged)}>
@@ -139,6 +179,12 @@ export function TraceWindow({ options }: { options: TraceOptions }) {
           setPaused(paused ? null : records);
           if (paused) setSelected(undefined);
         }}>{t(paused ? "monitor.resume" : "monitor.pause")}</button>}
+        {!status?.isFile && (
+          <button className="btn-outline" onClick={clearTrace}
+            disabled={!records.length && !visibleSignalChanges.length && !(paused && liveRecords.some((record) => record.sequence > clearedThrough))}>
+            {t("monitor.clear")}
+          </button>
+        )}
       </div>
       {(error || status?.reason) && <p role="status" className="text-sm text-ink-300">
         {error || (status?.reason ? t(reasons[status.reason]) : "")} {status?.detail}

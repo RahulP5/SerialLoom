@@ -115,6 +115,7 @@ export const fr = {
   "settings.saved": "Paramètres enregistrés",
   "settings.discard": "Annuler les modifications",
   "settings.save": "Enregistrer les paramètres",
+  "settings.unsaved": "Modifications non enregistrées",
   "appearance.title": "Apparence",
   "appearance.note": "Le changement s’applique immédiatement.",
   "theme.system": "Comme Windows",

@@ -113,6 +113,7 @@ export const zhCN: Messages = {
   "settings.saved": "设置已保存",
   "settings.discard": "放弃更改",
   "settings.save": "保存设置",
+  "settings.unsaved": "有未保存的更改",
   "appearance.title": "外观",
   "appearance.note": "立即生效。",
   "theme.system": "跟随 Windows",

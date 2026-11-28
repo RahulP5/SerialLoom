@@ -115,6 +115,7 @@ export const ru: Messages = {
   "settings.saved": "Настройки сохранены",
   "settings.discard": "Отменить изменения",
   "settings.save": "Сохранить настройки",
+  "settings.unsaved": "Несохранённые изменения",
   "appearance.title": "Оформление",
   "appearance.note": "Применяется сразу.",
   "theme.system": "Как в Windows",

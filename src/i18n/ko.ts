@@ -114,6 +114,7 @@ export const ko: Messages = {
   "settings.saved": "설정이 저장되었습니다",
   "settings.discard": "변경 취소",
   "settings.save": "설정 저장",
+  "settings.unsaved": "저장하지 않은 변경 사항이 있습니다",
   "appearance.title": "모양",
   "appearance.note": "바로 적용됩니다.",
   "theme.system": "Windows와 동일",

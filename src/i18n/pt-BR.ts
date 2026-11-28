@@ -115,6 +115,7 @@ export const ptBR: Messages = {
   "settings.saved": "Configurações salvas",
   "settings.discard": "Descartar",
   "settings.save": "Salvar configurações",
+  "settings.unsaved": "Alterações não salvas",
   "appearance.title": "Aparência",
   "appearance.note": "Aplicado imediatamente.",
   "theme.system": "Igual ao Windows",

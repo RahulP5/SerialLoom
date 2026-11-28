@@ -134,6 +134,7 @@ export const en = {
   "settings.saved": "Settings saved",
   "settings.discard": "Discard",
   "settings.save": "Save settings",
+  "settings.unsaved": "Unsaved changes",
   "appearance.title": "Appearance",
   "appearance.note": "Applies right away.",
   "theme.system": "Same as Windows",

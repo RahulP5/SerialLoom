@@ -121,6 +121,7 @@ export const es: Messages = {
   "settings.saved": "Configuración guardada",
   "settings.discard": "Descartar",
   "settings.save": "Guardar configuración",
+  "settings.unsaved": "Cambios sin guardar",
   "appearance.title": "Apariencia",
   "appearance.note": "Se aplica de inmediato.",
   "theme.system": "Igual que Windows",

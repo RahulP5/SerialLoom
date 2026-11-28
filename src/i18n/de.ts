@@ -121,6 +121,7 @@ export const de: Messages = {
   "settings.saved": "Einstellungen gespeichert",
   "settings.discard": "Verwerfen",
   "settings.save": "Einstellungen speichern",
+  "settings.unsaved": "Ungespeicherte Änderungen",
   "appearance.title": "Darstellung",
   "appearance.note": "Wird sofort übernommen.",
   "theme.system": "Wie Windows",

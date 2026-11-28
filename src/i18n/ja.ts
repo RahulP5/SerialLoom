@@ -114,6 +114,7 @@ export const ja: Messages = {
   "settings.saved": "設定を保存しました",
   "settings.discard": "変更を破棄",
   "settings.save": "設定を保存",
+  "settings.unsaved": "未保存の変更があります",
   "appearance.title": "外観",
   "appearance.note": "すぐに反映されます。",
   "theme.system": "Windows と同じ",

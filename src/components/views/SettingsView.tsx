@@ -36,98 +36,115 @@ export function SettingsView() {
   const setDriver = (d: DriverKind) => setDraft({ ...draft, driver: d });
 
   return (
-    <div className="h-full overflow-y-auto px-8 py-7">
-      <div className="mx-auto max-w-3xl space-y-6">
-        <div>
-          <h1 className="text-xl font-semibold text-ink-0">{t("settings.title")}</h1>
-          <p className="mt-1 text-sm text-ink-300">{t("settings.subtitle")}</p>
-        </div>
-
-        <Appearance />
-
-        <section className="panel p-5">
-          <h2 className="flex items-center gap-2 font-semibold text-ink-0">
-            <PanelBottom size={16} className="text-cyan-300" /> {t("background.title")}
-          </h2>
-          <p className="mt-1.5 text-sm text-ink-300">{t("background.text")}</p>
-          <p className="mt-1.5 text-sm text-ink-300">
-            {tr("background.quit", { quit: <b className="text-ink-100">{t("background.quitItem")}</b> })}
-          </p>
-          <label className="mt-3 flex items-center gap-2 text-sm text-ink-100">
-            <input
-              type="checkbox"
-              checked={draft.startWithWindows}
-              onChange={(e) => setDraft({ ...draft, startWithWindows: e.target.checked })}
-              className="accent-loom-500"
-            />
-            {t("background.startWithWindows")}
-          </label>
-        </section>
-
-        <Updates />
-
-        <AdminPermission />
-
-        <Automation draft={draft} setDraft={setDraft} />
-
-        <section className="panel p-5">
-          <h2 className="font-semibold text-ink-0">{t("driverSettings.title")}</h2>
-          <p className="mt-1 text-sm text-ink-300">{t("driverSettings.text")}</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <DriverCard
-              active={draft.driver === "usb"}
-              onClick={() => setDriver("usb")}
-              title={t("driverSettings.usbTitle")}
-              text={t("driverSettings.usbText")}
-            />
-            <DriverCard
-              active={draft.driver === "native"}
-              onClick={() => setDriver("native")}
-              title={t("driverSettings.nativeTitle")}
-              text={t("driverSettings.nativeText")}
-            />
-            <DriverCard
-              active={draft.driver === "demo"}
-              onClick={() => setDriver("demo")}
-              title={t("driverSettings.demoTitle")}
-              text={t("driverSettings.demoText")}
-            />
+    <div className="flex h-full flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
+        <div className="mx-auto max-w-3xl space-y-6">
+          <div>
+            <h1 className="text-xl font-semibold text-ink-0">{t("settings.title")}</h1>
+            <p className="mt-1 text-sm text-ink-300">{t("settings.subtitle")}</p>
           </div>
 
-          {driver && (
-            <div
-              className={clsx(
-                "mt-4 flex gap-2 rounded-lg border px-3 py-2.5 text-sm",
-                driver.available
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                  : "border-amber-500/30 bg-amber-500/10 text-amber-100",
-              )}
-            >
-              {driver.available ? (
-                <CircleCheck size={16} className="mt-0.5 shrink-0" />
-              ) : (
-                <CircleAlert size={16} className="mt-0.5 shrink-0" />
-              )}
-              <div className="min-w-0">
-                <div className="font-medium">
-                  {t(driver.available ? "driverSettings.ready" : "driverSettings.notInstalled", { name: driver.name })}
-                </div>
-                {driver.location && <div className="truncate font-mono text-xs opacity-80">{driver.location}</div>}
-              </div>
+          <Appearance />
+
+          <section className="panel p-5">
+            <h2 className="flex items-center gap-2 font-semibold text-ink-0">
+              <PanelBottom size={16} className="text-cyan-300" /> {t("background.title")}
+            </h2>
+            <p className="mt-1.5 text-sm text-ink-300">{t("background.text")}</p>
+            <p className="mt-1.5 text-sm text-ink-300">
+              {tr("background.quit", { quit: <b className="text-ink-100">{t("background.quitItem")}</b> })}
+            </p>
+            <label className="mt-3 flex items-center gap-2 text-sm text-ink-100">
+              <input
+                type="checkbox"
+                checked={draft.startWithWindows}
+                onChange={(e) => setDraft({ ...draft, startWithWindows: e.target.checked })}
+                className="accent-loom-500"
+              />
+              {t("background.startWithWindows")}
+            </label>
+          </section>
+
+          <Updates />
+
+          <AdminPermission />
+
+          <Automation draft={draft} setDraft={setDraft} />
+
+          <section className="panel p-5">
+            <h2 className="font-semibold text-ink-0">{t("driverSettings.title")}</h2>
+            <p className="mt-1 text-sm text-ink-300">{t("driverSettings.text")}</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <DriverCard
+                active={draft.driver === "usb"}
+                onClick={() => setDriver("usb")}
+                title={t("driverSettings.usbTitle")}
+                text={t("driverSettings.usbText")}
+              />
+              <DriverCard
+                active={draft.driver === "native"}
+                onClick={() => setDriver("native")}
+                title={t("driverSettings.nativeTitle")}
+                text={t("driverSettings.nativeText")}
+              />
+              <DriverCard
+                active={draft.driver === "demo"}
+                onClick={() => setDriver("demo")}
+                title={t("driverSettings.demoTitle")}
+                text={t("driverSettings.demoText")}
+              />
             </div>
-          )}
-          <div className="mt-4">
-            <DriverMissing />
-          </div>
-        </section>
 
-        <div className="flex justify-end gap-2">
-          <button className="btn-ghost" disabled={!dirty} onClick={() => setDraft(settings)}>
-            {t("settings.discard")}
-          </button>
-          <button className="btn-primary" disabled={!dirty || !!busy} onClick={() => saveSettings(draft)}>
-            {t("settings.save")}
-          </button>
+            {driver && (
+              <div
+                className={clsx(
+                  "mt-4 flex gap-2 rounded-lg border px-3 py-2.5 text-sm",
+                  driver.available
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                    : "border-amber-500/30 bg-amber-500/10 text-amber-100",
+                )}
+              >
+                {driver.available ? (
+                  <CircleCheck size={16} className="mt-0.5 shrink-0" />
+                ) : (
+                  <CircleAlert size={16} className="mt-0.5 shrink-0" />
+                )}
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {t(driver.available ? "driverSettings.ready" : "driverSettings.notInstalled", { name: driver.name })}
+                  </div>
+                  {driver.location && <div className="truncate font-mono text-xs opacity-80">{driver.location}</div>}
+                </div>
+              </div>
+            )}
+            <div className="mt-4">
+              <DriverMissing />
+            </div>
+          </section>
+        </div>
+      </div>
+
+      {/* Always visible, so a change further up the page is not left unsaved. */}
+      <div
+        className={clsx(
+          "shrink-0 border-t px-8 py-3 transition-colors",
+          dirty ? "border-amber-500/40 bg-amber-500/10" : "border-ink-700 bg-ink-850",
+        )}
+      >
+        <div className="mx-auto flex max-w-3xl items-center gap-2">
+          {dirty && (
+            <span className="flex items-center gap-2 text-sm font-medium text-amber-100" role="status">
+              <CircleAlert size={15} className="shrink-0" /> {t("settings.unsaved")}
+            </span>
+          )}
+          <div className="ml-auto flex gap-2">
+            <button className="btn-ghost" disabled={!dirty} onClick={() => setDraft(settings)}>
+              {t("settings.discard")}
+            </button>
+            <button className="btn-primary" disabled={!dirty || !!busy} onClick={() => saveSettings(draft)}>
+              {t("settings.save")}
+            </button>
+          </div>
         </div>
       </div>
     </div>

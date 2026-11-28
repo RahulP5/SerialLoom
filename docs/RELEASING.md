@@ -50,6 +50,6 @@ The installer is not code-signed yet, so Windows SmartScreen asks users to confi
 
 ## 5. Installer template
 
-`src-tauri/windows/installer.nsi` is Tauri's NSIS template for the `@tauri-apps/cli` version in `package-lock.json` (now 2.12.4), with one change marked `SerialLoom:` in `PageReinstall`: an upgrade installs over the existing version instead of uninstalling it first. Tauri's default is to uninstall first, and SerialLoom's uninstaller removes every virtual port, SerialLoom Helper and the virtual USB controller, so updates used to lose the user's ports and settings.
+`src-tauri/windows/installer.nsi` is Tauri's NSIS template for the `@tauri-apps/cli` version in `package-lock.json` (now 2.12.4), with two changes marked `SerialLoom:`. In `PageReinstall`, an upgrade installs over the existing version instead of uninstalling it first: Tauri's default is to uninstall first, and SerialLoom's uninstaller removes every virtual port, SerialLoom Helper and the virtual USB controller, so updates used to lose the user's ports and settings. And the uninstaller uses the app icon, since Tauri leaves its icon empty.
 
-When `@tauri-apps/cli` is updated, take `crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi` from the matching `tauri-cli-v…` tag and re-apply that change. Then test an update from the previous release: its ports (with their COM numbers), connections and settings must survive.
+When `@tauri-apps/cli` is updated, take `crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi` from the matching `tauri-cli-v…` tag and re-apply both changes. Then test an update from the previous release: its ports (with their COM numbers), connections and settings must survive.

@@ -135,7 +135,6 @@ pub fn run() {
             commands::open_trace_window,
             commands::capture_link,
             commands::update_simulator,
-            commands::capture_usb_probe,
             commands::automation_info,
             commands::helper_status,
             commands::install_helper,

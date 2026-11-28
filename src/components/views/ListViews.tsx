@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { ArrowLeftRight, Cable, CircleAlert, Download, Hash, Plus, Split, Stethoscope, Trash } from "lucide-react";
 import { useStore } from "../../store";
-import { openUsbProbe } from "../../lib/trace";
-import { api, inTauri } from "../../lib/api";
+import { api } from "../../lib/api";
 import { DEFAULT_SERIAL, type PortInfo } from "../../lib/types";
 import { KindBadge } from "../PortIcon";
 import { hubLabel } from "../../lib/format";
@@ -42,7 +41,7 @@ function endpointFor(p: PortInfo) {
 }
 
 export function PortsView() {
-  const { ports, hubs, openDialog, setView, toast } = useStore();
+  const { ports, hubs, openDialog, setView } = useStore();
   const t = useT();
   const hubName = (id: string | null) => hubs.find((h) => h.spec.id === id)?.spec.name;
 
@@ -96,12 +95,6 @@ export function PortsView() {
                   )}
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
-                  {inTauri && <button className="btn-ghost px-2 py-1 text-xs"
-                    disabled={!p.present || (p.kind !== "usb" && p.vid == null)}
-                    title={p.kind === "usb" || p.vid != null ? t("probe.title") : t("probe.usbOnly")}
-                    onClick={() => void openUsbProbe(p.name).catch((error) => toast("error", String(error)))}>
-                    {t("probe.title")}
-                  </button>}
                   {!p.inUseBy && (
                     <>
                       <button className="btn-ghost px-2 py-1 text-xs" onClick={() => start("split", p)}>

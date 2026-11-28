@@ -79,10 +79,6 @@ export const replayMessages = {
 export const en = {
   ...replayMessages,
   // Shared
-  "probe.title": "Passive USB probe",
-  "probe.usbOnly": "USB serial devices only",
-  "probe.commands": "* DTR and RTS show the last observed command. Times are UTC.",
-  "probe.raw": "Raw USB bulk payloads.",
   "trace.destination": "Capture destination",
   "trace.interactive": "Interactive trace",
   "trace.file": "Record to file",

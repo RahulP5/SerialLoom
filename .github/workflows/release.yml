@@ -64,7 +64,7 @@ jobs:
             Installing a new version over an older one now updates it in place: your virtual ports keep their COM numbers, and your connections and settings stay. Before, the installer uninstalled the old version first, which removed all virtual ports and could delete the settings. This applies from this update on, including when you update from 0.4.0. If you uninstall SerialLoom but keep its settings and install it again, your virtual ports also get their old COM numbers back, so saved connections keep working.
 
             #### Also new
-            - **Français:** SerialLoom is now available in French (#18).
+            - **Français:** SerialLoom and its installer are now available in French (#18).
             - **File replay:** play raw bytes, NMEA 0183 sentences or Actisense-format NMEA 2000 records from a file into a connection, at a set byte rate or with the recorded timing, once or in a loop.
             - **Traffic capture:** right-click a link in the topology for an *Interactive trace* window or *Record to file* (text, hex or both, with UTC timestamps). Captures stop after 10 minutes, cap each file at 128 MB and keep 20 GB free on the disk.
             - **Back up and restore:** the *Backup* menu at the top right of the topology (*Export JSON*, *Import JSON*) saves and restores your connections, virtual ports and layout.

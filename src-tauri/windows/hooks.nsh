@@ -9,8 +9,10 @@
 ; Writes a line to the install log in the installer's language, English for
 ; any other. Tauri includes this file before it loads the languages, so the
 ; text is picked when the line is written, by language id.
-!macro SL_DETAIL EN DE ES PT RU ZH JA KO
-  ${If} $LANGUAGE == 1031 ; German
+!macro SL_DETAIL EN DE ES PT RU ZH JA KO FR
+  ${If} $LANGUAGE == 1036 ; French
+    DetailPrint "${FR}"
+  ${ElseIf} $LANGUAGE == 1031 ; German
     DetailPrint "${DE}"
   ${ElseIf} $LANGUAGE == 1034 ; Spanish
     DetailPrint "${ES}"
@@ -45,7 +47,8 @@
     "Установка виртуального USB-контроллера для COM-портов SerialLoom..." \
     "正在为 SerialLoom 的 COM 端口安装虚拟 USB 控制器..." \
     "SerialLoom の COM ポート用の仮想 USB コントローラーをインストールしています..." \
-    "SerialLoom COM 포트용 가상 USB 컨트롤러 설치 중..."
+    "SerialLoom COM 포트용 가상 USB 컨트롤러 설치 중..." \
+    "Installation du contrôleur USB virtuel pour les ports COM de SerialLoom..."
   nsExec::ExecToLog '"$INSTDIR\serialloom.exe" --serialloom-admin "$TEMP\serialloom-reply-installer.json" install-usb'
   Pop $0
   ${If} $0 != 0
@@ -57,7 +60,8 @@
       "Установка вернула код $0. Повторить можно в SerialLoom > Настройки." \
       "安装程序返回代码 $0。可在 SerialLoom > 设置 中重试。" \
       "セットアップがコード $0 を返しました。SerialLoom > 設定 から再試行できます。" \
-      "설치 프로그램이 코드 $0을(를) 반환했습니다. SerialLoom > 설정에서 다시 시도할 수 있습니다."
+      "설치 프로그램이 코드 $0을(를) 반환했습니다. SerialLoom > 설정에서 다시 시도할 수 있습니다." \
+      "L’installation a renvoyé le code $0. Vous pouvez réessayer depuis SerialLoom > Paramètres."
   ${EndIf}
 
   ; Command-line tool for scripts and tests (built by beforeBuildCommand
@@ -74,7 +78,8 @@
     "Установка SerialLoom Helper..." \
     "正在安装 SerialLoom Helper..." \
     "SerialLoom Helper をインストールしています..." \
-    "SerialLoom Helper 설치 중..."
+    "SerialLoom Helper 설치 중..." \
+    "Installation de SerialLoom Helper..."
   nsExec::ExecToLog '"$INSTDIR\serialloom.exe" --serialloom-admin "$TEMP\serialloom-reply-installer-helper.json" install-service'
   Pop $0
   ${If} $0 != 0
@@ -86,7 +91,8 @@
       "SerialLoom Helper не установлен (код $0). Windows будет запрашивать разрешение при изменении портов; повторить можно в SerialLoom > Настройки." \
       "未安装 SerialLoom Helper（代码 $0）。更改端口时 Windows 会请求权限；可在 SerialLoom > 设置 中重试。" \
       "SerialLoom Helper はインストールされませんでした（コード $0）。ポートを変更するたびに Windows が許可を求めます。SerialLoom > 設定 から再試行できます。" \
-      "SerialLoom Helper가 설치되지 않았습니다(코드 $0). 포트를 변경할 때마다 Windows에서 권한을 요청합니다. SerialLoom > 설정에서 다시 시도할 수 있습니다."
+      "SerialLoom Helper가 설치되지 않았습니다(코드 $0). 포트를 변경할 때마다 Windows에서 권한을 요청합니다. SerialLoom > 설정에서 다시 시도할 수 있습니다." \
+      "SerialLoom Helper n’a pas été installé (code $0). Windows demandera une autorisation à chaque modification de port ; vous pouvez réessayer depuis SerialLoom > Paramètres."
   ${EndIf}
 !macroend
 
@@ -100,7 +106,8 @@
     "Удаление виртуальных портов и драйверов SerialLoom..." \
     "正在移除 SerialLoom 的虚拟串口和驱动..." \
     "SerialLoom の仮想ポートとドライバーを削除しています..." \
-    "SerialLoom 가상 포트와 드라이버 제거 중..."
+    "SerialLoom 가상 포트와 드라이버 제거 중..." \
+    "Suppression des ports virtuels et des pilotes de SerialLoom..."
   nsExec::ExecToLog '"$INSTDIR\serialloom.exe" --serialloom-admin "$TEMP\serialloom-reply-uninstaller.json" uninstall-all'
   Pop $0
   Delete "$INSTDIR\serialloom-cli.exe"

@@ -1,8 +1,9 @@
 Unicode true
 ; Tauri's NSIS installer template from tauri-cli v2.12.4
-; (crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi), with one
-; SerialLoom change marked "SerialLoom:" in PageReinstall. When upgrading
-; @tauri-apps/cli, take the template from the matching tag and re-apply it.
+; (crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi), with two
+; SerialLoom changes marked "SerialLoom:" (PageReinstall, and the uninstaller
+; icon). When upgrading @tauri-apps/cli, take the template from the matching
+; tag and re-apply them.
 
 ManifestDPIAware true
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
@@ -163,6 +164,10 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; Uninstaller icon
 !if "${UNINSTALLERICON}" != ""
   !define MUI_UNICON "${UNINSTALLERICON}"
+!else if "${INSTALLERICON}" != ""
+  ; SerialLoom: Tauri leaves the uninstaller icon empty, which shows NSIS's
+  ; generic icon; use the app's icon, as the installer does.
+  !define MUI_UNICON "${INSTALLERICON}"
 !endif
 
 ; Define registry key to store installer language

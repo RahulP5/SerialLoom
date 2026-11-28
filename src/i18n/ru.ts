@@ -209,6 +209,8 @@ export const ru: Messages = {
 
   "topology.import": "Импорт JSON",
   "topology.export": "Экспорт JSON",
+  "topology.backup": "Резервная копия",
+  "topology.backupTip": "Сохранить или восстановить подключения, виртуальные порты и расположение в файле JSON",
   "topology.backupExported": "Резервная копия топологии сохранена.",
   "topology.backupImported": "Топология импортирована. Новые соединения остановлены.",
   "topology.backupInvalid": "Недействительная или неподдерживаемая копия топологии SerialLoom.",

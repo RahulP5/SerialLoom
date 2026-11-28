@@ -208,6 +208,8 @@ export const ja: Messages = {
 
   "topology.import": "JSON をインポート",
   "topology.export": "JSON をエクスポート",
+  "topology.backup": "バックアップ",
+  "topology.backupTip": "接続、仮想ポート、レイアウトを JSON ファイルに保存または復元",
   "topology.backupExported": "トポロジーのバックアップを保存しました。",
   "topology.backupImported": "トポロジーをインポートしました。新しい接続は停止中です。",
   "topology.backupInvalid": "SerialLoom のトポロジーバックアップが無効か、対応していません。",

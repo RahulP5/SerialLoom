@@ -208,6 +208,8 @@ export const ko: Messages = {
 
   "topology.import": "JSON 가져오기",
   "topology.export": "JSON 내보내기",
+  "topology.backup": "백업",
+  "topology.backupTip": "연결, 가상 포트, 레이아웃을 JSON 파일로 저장하거나 복원",
   "topology.backupExported": "토폴로지 백업을 저장했습니다.",
   "topology.backupImported": "토폴로지를 가져왔습니다. 새 연결은 중지 상태입니다.",
   "topology.backupInvalid": "SerialLoom 토폴로지 백업이 잘못되었거나 지원되지 않습니다.",

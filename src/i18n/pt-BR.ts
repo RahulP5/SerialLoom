@@ -209,6 +209,8 @@ export const ptBR: Messages = {
 
   "topology.import": "Importar JSON",
   "topology.export": "Exportar JSON",
+  "topology.backup": "Backup",
+  "topology.backupTip": "Salvar ou restaurar conexões, portas virtuais e layout em um arquivo JSON",
   "topology.backupExported": "Backup da topologia salvo.",
   "topology.backupImported": "Topologia importada. As novas conexões estão paradas.",
   "topology.backupInvalid": "Backup de topologia do SerialLoom inválido ou incompatível.",

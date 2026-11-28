@@ -215,6 +215,8 @@ export const de: Messages = {
 
   "topology.import": "JSON importieren",
   "topology.export": "JSON exportieren",
+  "topology.backup": "Sicherung",
+  "topology.backupTip": "Verbindungen, virtuelle Ports und Layout als JSON-Datei sichern oder wiederherstellen",
   "topology.backupExported": "Topologiesicherung gespeichert.",
   "topology.backupImported": "Topologie importiert. Neue Verbindungen sind gestoppt.",
   "topology.backupInvalid": "Ungültige oder nicht unterstützte SerialLoom-Topologiesicherung.",

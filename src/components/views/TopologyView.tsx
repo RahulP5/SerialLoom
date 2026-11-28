@@ -11,12 +11,26 @@ import {
   useReactFlow,
   type NodeChange,
 } from "@xyflow/react";
-import { ArrowLeftRight, Cable, GripVertical, LayoutGrid, Merge, Plus, RadioTower, Split } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Cable,
+  ChevronDown,
+  Download,
+  FileJson,
+  GripVertical,
+  LayoutGrid,
+  Merge,
+  Plus,
+  RadioTower,
+  Split,
+  Upload,
+} from "lucide-react";
 import clsx from "clsx";
 import { listen } from "@tauri-apps/api/event";
 import { inTauri } from "../../lib/api";
 import { useStore } from "../../store";
 import { loadMirroredHubs, loadPositions, saveMirroredHubs, savePositions } from "../../lib/topologyPositions";
+import { exportTopology, importTopology } from "../../lib/topologyBackup";
 import { useTheme } from "../../lib/theme";
 import { buildGraph, type GraphNode } from "../graph";
 import { EndpointNode } from "../nodes/EndpointNode";
@@ -34,17 +48,19 @@ const REPLAY_MIME = "application/x-serialloom-replay";
 export const DRAG_MIME = "application/x-serialloom-port";
 
 export function TopologyView() {
+  // Bumped after an import, so the canvas reloads the restored layout.
+  const [layoutVersion, setLayoutVersion] = useState(0);
   return (
     <ReactFlowProvider>
       <div className="flex h-full min-h-0">
         <PortPalette />
-        <Canvas />
+        <Canvas key={layoutVersion} onImported={() => setLayoutVersion((v) => v + 1)} />
       </div>
     </ReactFlowProvider>
   );
 }
 
-function Canvas() {
+function Canvas({ onImported }: { onImported: () => void }) {
   const { hubs, ports, rates, selection, select, openDialog } = useStore();
   const theme = useTheme((s) => s.resolved);
   const lang = useI18n((s) => s.lang);
@@ -200,13 +216,118 @@ function Canvas() {
           <Cable size={15} /> {t("topology.virtualPair")}
         </button>
       </div>
-      <div className="absolute top-3 right-3">
+      <div className="absolute top-3 right-3 flex gap-2">
         <button className="btn-outline bg-ink-850/90" onClick={resetLayout} title={t("topology.autoLayoutTip")}>
           <LayoutGrid size={15} /> {t("topology.autoLayout")}
         </button>
+        <BackupMenu nodes={nodes} mirroredHubs={mirroredHubs} onImported={onImported} />
       </div>
 
       {empty && <EmptyState />}
+    </div>
+  );
+}
+
+/** Saves or restores connections, virtual ports and the layout as a JSON file. */
+function BackupMenu({
+  nodes,
+  mirroredHubs,
+  onImported,
+}: {
+  nodes: GraphNode[];
+  mirroredHubs: ReadonlySet<string>;
+  onImported: () => void;
+}) {
+  const { run, toast } = useStore();
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (!menu.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("pointerdown", onPointer);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const exportJson = () =>
+    run(t("topology.export"), async () => {
+      const positions = Object.fromEntries(nodes.map(({ id, position }) => [id, position]));
+      if (await exportTopology(positions, mirroredHubs)) toast("success", t("topology.backupExported"));
+    });
+
+  const importJson = (file: File) =>
+    run(t("topology.import"), async () => {
+      const { positions, mirroring } = await importTopology(await file.text());
+      savePositions({ ...loadPositions(), ...positions });
+      if (mirroring.size) {
+        const mirrored = loadMirroredHubs();
+        for (const [id, on] of mirroring) {
+          if (on) mirrored.add(id);
+          else mirrored.delete(id);
+        }
+        saveMirroredHubs(mirrored);
+      }
+      onImported();
+      toast("success", t("topology.backupImported"));
+    });
+
+  const item =
+    "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-ink-200 hover:bg-ink-800 hover:text-ink-0";
+  return (
+    <div ref={menu} className="relative">
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange={(e) => {
+          const file = e.currentTarget.files?.[0];
+          e.currentTarget.value = "";
+          if (file) void importJson(file);
+        }}
+      />
+      <button
+        className="btn-outline bg-ink-850/90"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        title={t("topology.backupTip")}
+      >
+        <FileJson size={15} /> {t("topology.backup")} <ChevronDown size={14} />
+      </button>
+      {open && (
+        <div role="menu" className="panel absolute right-0 z-20 mt-1.5 w-52 p-1 shadow-xl shadow-black/40">
+          <button
+            role="menuitem"
+            className={item}
+            onClick={() => {
+              setOpen(false);
+              void exportJson();
+            }}
+          >
+            <Upload size={14} /> {t("topology.export")}
+          </button>
+          <button
+            role="menuitem"
+            className={item}
+            onClick={() => {
+              setOpen(false);
+              fileInput.current?.click();
+            }}
+          >
+            <Download size={14} /> {t("topology.import")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

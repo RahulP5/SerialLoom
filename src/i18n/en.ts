@@ -232,6 +232,8 @@ export const en = {
   // Topology page
   "topology.import": "Import JSON",
   "topology.export": "Export JSON",
+  "topology.backup": "Backup",
+  "topology.backupTip": "Save or restore connections, virtual ports and layout as a JSON file",
   "topology.backupExported": "Topology backup saved.",
   "topology.backupImported": "Topology imported. New connections are stopped.",
   "topology.backupInvalid": "Invalid or unsupported SerialLoom topology backup.",

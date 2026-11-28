@@ -209,6 +209,8 @@ export const fr = {
 
   "topology.import": "Importer le JSON",
   "topology.export": "Exporter le JSON",
+  "topology.backup": "Sauvegarde",
+  "topology.backupTip": "Enregistrer ou restaurer les connexions, les ports virtuels et la disposition dans un fichier JSON",
   "topology.backupExported": "Sauvegarde de la topologie enregistrée.",
   "topology.backupImported": "Topologie importée. Les nouvelles connexions sont à l’arrêt.",
   "topology.backupInvalid": "Sauvegarde de topologie SerialLoom invalide ou non compatible.",

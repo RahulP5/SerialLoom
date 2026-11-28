@@ -204,6 +204,8 @@ export const zhCN: Messages = {
 
   "topology.import": "导入 JSON",
   "topology.export": "导出 JSON",
+  "topology.backup": "备份",
+  "topology.backupTip": "将连接、虚拟串口和布局保存到 JSON 文件，或从中恢复",
   "topology.backupExported": "拓扑备份已保存。",
   "topology.backupImported": "拓扑已导入。新连接处于停止状态。",
   "topology.backupInvalid": "SerialLoom 拓扑备份无效或不受支持。",

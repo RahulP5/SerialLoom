@@ -7,7 +7,9 @@
 //! SerialLoom driver signing.
 //!
 //! The ports exist while SerialLoom runs. Each keeps a fixed USB serial
-//! number, so Windows gives it the same COM number every time.
+//! number, so Windows gives it the same COM number every time. If Windows
+//! has forgotten the device (SerialLoom was uninstalled and installed
+//! again), SerialLoom gives the port its number back.
 
 pub mod system;
 pub mod vhci;
@@ -105,11 +107,106 @@ impl UsbDriver {
         if !Self::controller_ready() {
             return;
         }
-        let devices: Vec<Arc<VirtualDevice>> =
-            self.ports.lock().iter().map(|p| Arc::clone(&p.device)).collect();
+        // Windows gives a device it remembers its old COM number. One it has
+        // forgotten (SerialLoom was uninstalled, or the device was removed in
+        // Device Manager) gets the next free number, and connections would no
+        // longer find it, so those get their number back once Windows has
+        // named them. Ports Windows remembers keep the number it has for
+        // them, including one changed in Device Manager.
+        let known = system::known_serials()
+            .inspect_err(|e| tracing::warn!("cannot list the devices Windows knows: {e}"))
+            .ok();
+        let (devices, forgotten): (Vec<Arc<VirtualDevice>>, Vec<(String, String)>) = {
+            let ports = self.ports.lock();
+            let forgotten = ports
+                .iter()
+                .filter(|p| {
+                    known
+                        .as_ref()
+                        .is_some_and(|k| !k.contains(&p.saved.serial.to_ascii_uppercase()))
+                })
+                .filter_map(|p| Some((p.saved.serial.clone(), p.saved.name.clone()?)))
+                .collect();
+            (ports.iter().map(|p| Arc::clone(&p.device)).collect(), forgotten)
+        };
         for d in devices {
             if let Err(e) = self.attach(&d) {
                 tracing::warn!("re-attaching {} failed: {e}", d.busid());
+            }
+        }
+        if !forgotten.is_empty() {
+            self.restore_names(&forgotten);
+        }
+    }
+
+    /// Gives ports Windows had forgotten their COM numbers back (`wanted`:
+    /// serial number and COM name), in one administrator step. A port whose
+    /// number something else now holds keeps the new one, with a note.
+    fn restore_names(&self, wanted: &[(String, String)]) {
+        let assigned: Vec<(String, String)> = wanted
+            .iter()
+            .filter_map(|(serial, _)| {
+                Self::wait_for_name(serial, None)
+                    .inspect_err(|e| tracing::warn!("device {serial}: {e}"))
+                    .ok()
+                    .map(|name| (serial.clone(), name))
+            })
+            .collect();
+        let mut why: HashMap<String, String> = HashMap::new();
+        let mut moves = Vec::new();
+        for (serial, want) in wanted {
+            let Some((_, now)) = assigned.iter().find(|(s, _)| s == serial) else {
+                continue;
+            };
+            if now.eq_ignore_ascii_case(want) {
+                continue;
+            }
+            // One of these ports may hold the number; it moves away first.
+            let held_here = assigned
+                .iter()
+                .any(|(s, n)| s != serial && n.eq_ignore_ascii_case(want));
+            if !held_here && let Some(owner) = system::com_name_holder(want, Some(serial)) {
+                why.insert(serial.clone(), format!("{want} is used by \"{owner}\""));
+                continue;
+            }
+            moves.push((serial.clone(), now.clone(), want.clone()));
+        }
+        let (order, stuck) = rename_order(&assigned, moves);
+        for (serial, _, want) in stuck {
+            why.insert(
+                serial,
+                format!("{want} is held by another port that could not move"),
+            );
+        }
+
+        let mut error = None;
+        if !order.is_empty() {
+            tracing::info!("giving forgotten ports their numbers back: {order:?}");
+            if let Err(e) =
+                super::native::elevate::run(super::native::elevate::AdminOp::RenameUsbPorts(order.clone()))
+            {
+                tracing::error!("restoring port numbers failed: {e}");
+                error = Some(e.to_string());
+            }
+        }
+        for (serial, want) in wanted {
+            let renamed = error.is_none() && order.iter().any(|(s, _)| s == serial);
+            let now = if renamed {
+                Self::wait_for_name(serial, Some(want)).ok()
+            } else {
+                system::com_port_for_serial(serial)
+            };
+            if now.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(want)) {
+                continue;
+            }
+            let reason = why.remove(serial).or_else(|| error.clone());
+            let note = format!(
+                "Windows gave this port {} instead of {want}{}. Use \"Change number\" to try again.",
+                now.as_deref().unwrap_or("a new number"),
+                reason.map(|r| format!(" ({r})")).unwrap_or_default()
+            );
+            if let Some(p) = self.ports.lock().iter_mut().find(|p| &p.saved.serial == serial) {
+                p.note = Some(note);
             }
         }
     }
@@ -489,5 +586,95 @@ impl PortDriver for UsbDriver {
 
     fn open_paired(&self, port: &str) -> Result<Box<dyn ControlChannel>> {
         Ok(Box::new(self.device(port)?.open_paired()?))
+    }
+}
+
+/// A port to renumber: serial number, current COM name, wanted COM name.
+type Move = (String, String, String);
+
+/// Orders renames so each number is free when its turn comes: a port takes
+/// a number only after the port holding it (`held`: serial number and
+/// name) has moved away. Returns the renames in order, and the moves left
+/// waiting (a circle, or a holder that does not move).
+fn rename_order(held: &[(String, String)], mut moves: Vec<Move>) -> (Vec<(String, String)>, Vec<Move>) {
+    let mut holder: HashMap<String, String> = held
+        .iter()
+        .map(|(serial, name)| (name.to_ascii_uppercase(), serial.clone()))
+        .collect();
+    let mut order = Vec::new();
+    loop {
+        let before = moves.len();
+        moves.retain(|(serial, from, to)| {
+            let to_key = to.to_ascii_uppercase();
+            if holder.get(&to_key).is_some_and(|h| h != serial) {
+                return true;
+            }
+            holder.remove(&from.to_ascii_uppercase());
+            holder.insert(to_key, serial.clone());
+            order.push((serial.clone(), to.clone()));
+            false
+        });
+        if moves.len() == before {
+            return (order, moves);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Move, rename_order};
+
+    fn pairs(items: &[(&str, &str)]) -> Vec<(String, String)> {
+        items
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    fn moves(items: &[(&str, &str, &str)]) -> Vec<Move> {
+        items
+            .iter()
+            .map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string()))
+            .collect()
+    }
+
+    /// After a reinstall on this PC: COM20/COM21 came back as COM9/COM8 and
+    /// COM8/COM9 as COM11/COM10.
+    #[test]
+    fn frees_each_number_before_it_is_taken() {
+        let held = pairs(&[("A", "COM9"), ("B", "COM8"), ("C", "COM11"), ("D", "COM10")]);
+        let wanted = moves(&[
+            ("A", "COM9", "COM20"),
+            ("B", "COM8", "COM21"),
+            ("C", "COM11", "COM8"),
+            ("D", "COM10", "COM9"),
+        ]);
+        let (order, stuck) = rename_order(&held, wanted);
+        assert!(stuck.is_empty());
+        let at = |serial: &str| order.iter().position(|(s, _)| s == serial).unwrap();
+        assert_eq!(order.len(), 4);
+        assert!(at("B") < at("C"), "COM8 is freed before it is taken: {order:?}");
+        assert!(at("A") < at("D"), "COM9 is freed before it is taken: {order:?}");
+    }
+
+    #[test]
+    fn a_circle_is_left_waiting() {
+        let held = pairs(&[("A", "COM8"), ("B", "COM9"), ("C", "COM12")]);
+        let wanted = moves(&[
+            ("A", "COM8", "com9"),
+            ("B", "COM9", "COM8"),
+            ("C", "COM12", "COM30"),
+        ]);
+        let (order, stuck) = rename_order(&held, wanted);
+        assert_eq!(order, vec![("C".to_string(), "COM30".to_string())]);
+        assert_eq!(stuck.len(), 2);
+    }
+
+    #[test]
+    fn waits_on_a_holder_that_does_not_move() {
+        let held = pairs(&[("A", "COM8"), ("B", "COM9")]);
+        let (order, stuck) = rename_order(&held, moves(&[("A", "COM8", "COM9")]));
+        assert!(order.is_empty());
+        assert_eq!(stuck.len(), 1);
     }
 }

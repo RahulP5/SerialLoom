@@ -2,6 +2,7 @@
 //! installing/removing its signed drivers, and finding the COM port Windows
 //! assigned to one of our virtual devices.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::*;
@@ -447,6 +448,26 @@ fn our_serial_of(instance_id: &str) -> Option<String> {
     let prefix = format!(r"{}\", our_usb_prefix());
     let rest = upper.strip_prefix(&prefix)?;
     is_our_serial(rest).then(|| rest.to_string())
+}
+
+/// Serial numbers of the SerialLoom devices Windows has an entry for,
+/// plugged in or not. Windows keeps each device's COM number in that entry;
+/// a device without one (SerialLoom was uninstalled, or the device was
+/// removed in Device Manager) gets the next free number when plugged in.
+pub fn known_serials() -> Result<HashSet<String>> {
+    let set = all_devices_including_absent()?;
+    let mut serials = HashSet::new();
+    for index in 0.. {
+        let mut data = new_devinfo_data();
+        // SAFETY: data.cbSize is set; the set is valid.
+        if unsafe { SetupDiEnumDeviceInfo(set.0, index, &mut data) } == 0 {
+            break;
+        }
+        if let Some(serial) = our_serial_of(&instance_id(&set, &data)) {
+            serials.insert(serial);
+        }
+    }
+    Ok(serials)
 }
 
 /// Every device node, including ones that are not plugged in ("phantoms").

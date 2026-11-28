@@ -61,7 +61,7 @@ jobs:
             - A UDP endpoint listens on this PC only (`127.0.0.1`) unless you enter another address.
 
             #### Updating keeps your setup
-            Installing a new version over an older one now updates it in place: your virtual ports keep their COM numbers, and your connections and settings stay. Before, the installer uninstalled the old version first, which removed all virtual ports and could delete the settings. This applies from this update on, including when you update from 0.4.0.
+            Installing a new version over an older one now updates it in place: your virtual ports keep their COM numbers, and your connections and settings stay. Before, the installer uninstalled the old version first, which removed all virtual ports and could delete the settings. This applies from this update on, including when you update from 0.4.0. If you uninstall SerialLoom but keep its settings and install it again, your virtual ports also get their old COM numbers back, so saved connections keep working.
 
             #### Also new
             - **Français:** SerialLoom is now available in French (#18).

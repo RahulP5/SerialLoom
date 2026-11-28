@@ -10,3 +10,8 @@
 src/i18n/*.ts linguist-detectable=false
 src/i18n/index.ts linguist-detectable
 src/lib/mock.ts linguist-detectable=false
+# Tauri's NSIS installer template, copied with two small SerialLoom changes
+# (see docs/RELEASING.md), is third-party code.
+src-tauri/windows/installer.nsi linguist-vendored
+# The example scripts for users are documentation, not the app's code.
+docs/examples/** linguist-documentation
